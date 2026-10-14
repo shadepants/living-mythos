@@ -25,6 +25,7 @@ URL options: `?seed=N` `?q=low|mid|high` `?atmo=0..1` `?debug=1` (developer over
 ![monsoon](docs/screens/monsoon.png)
 ![aurora](docs/screens/aurora-low-angle.png)
 ![village at night](docs/screens/village-night.png)
+On the phone (Pixel, portrait, its own GPU): `docs/screens/phone-portrait.png`.
 Tool shots: `docs/screens/tool-sculpt.png`, `tool-raincloud.png`, `tool-monolith.png`, `tool-breeze.png`.
 
 ## Build & verify (no GPU needed for most of it)
@@ -38,5 +39,6 @@ npm run verify     # everything above
 node tools/preview-map.mjs out.ppm 240   # top-down picture of the simulation after 240 sim seconds
 node tools/snap.mjs out.png --query atmo=0.5   # render a real frame (software GL) — see NOTES.md
 node tools/shoot-tools.mjs dir           # drive the four tools with the mouse and save frames
+node tools/phone-server.mjs 8765 /tmp/phone   # then termux-open-url 'http://localhost:8765/?report=x&debug=1' — run it on the phone itself and read fps/GPU/errors/snapshot back
 ```
 See NOTES.md for architecture notes, tuning history and the one big caveat (visuals not yet seen by a human).

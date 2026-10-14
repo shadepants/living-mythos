@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { SHARED } from './shared.js';
 import {
-  GLSL_FLORA_VERT_PARS, GLSL_FLORA_VERT_NORMAL, GLSL_FLORA_VERT_POS, GLSL_FLORA_FRAG_COLOR, GLSL_FLORA_FRAG_EMISSIVE,
+  GLSL_FLORA_VERT_PARS, GLSL_FLORA_VERT_NORMAL, GLSL_FLORA_VERT_POS, GLSL_FLORA_FRAG_COLOR, GLSL_FLORA_FRAG_EMISSIVE, GLSL_FLORA_SHADE,
 } from './glsl_flora.js';
 import { hash2 } from '../sim/noise.js';
 
@@ -63,16 +63,17 @@ export function createFlora(caps, count) {
     shader.uniforms.uSimTexA = SHARED.uSimTexA; shader.uniforms.uSimTexB = SHARED.uSimTexB;
     shader.uniforms.uTime = SHARED.uTime; shader.uniforms.uCell = SHARED.uCell;
     shader.uniforms.uWind = SHARED.uWind; shader.uniforms.uNight = SHARED.uNight;
-    shader.uniforms.uCloud = SHARED.uCloud; shader.uniforms.uBreeze = SHARED.uBreeze;
+    shader.uniforms.uSimTexC = SHARED.uSimTexC; shader.uniforms.uCloud = SHARED.uCloud; shader.uniforms.uBreeze = SHARED.uBreeze;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${GLSL_FLORA_VERT_PARS}`)
       .replace('#include <beginnormal_vertex>', GLSL_FLORA_VERT_NORMAL)
       .replace('#include <begin_vertex>', GLSL_FLORA_VERT_POS);
     shader.vertexShader = shader.vertexShader.replace('void main() {', 'void main() {');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vFloraCol;\nvarying vec3 vGlow;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vFloraCol;\nvarying vec3 vGlow;\nvarying float vShade;')
       .replace('#include <color_fragment>', GLSL_FLORA_FRAG_COLOR)
-      .replace('#include <emissivemap_fragment>', GLSL_FLORA_FRAG_EMISSIVE);
+      .replace('#include <emissivemap_fragment>', GLSL_FLORA_FRAG_EMISSIVE)
+      .replace('#include <lights_fragment_end>', GLSL_FLORA_SHADE);
   };
 
   const mesh = new THREE.InstancedMesh(geo, mat, n);

@@ -3,12 +3,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { detectCaps } from './gl/caps.js';
 import { createSceneTarget, createComposite } from './gl/post.js';
 import { SHARED } from './gl/shared.js';
-import { createSimTextures, packSimTextures } from './gl/simtex.js';
+import { createSimTextures, packSimTextures, packShadeTexture } from './gl/simtex.js';
 import { createCursor } from './gl/cursor.js';
 import { createRaincloud } from './gl/cloud.js';
 import { createRingFx } from './gl/fxbridge.js';
 import { createDock, createMuteButton, createPhotoButton, TOOL_HINTS } from './ui/dock.js';
 import { createDebugOverlay } from './ui/debug.js';
+import { createReporter } from './ui/report.js';
 import { QUALITY, TIER_NAMES, pickInitialTier, createGovernor, governorSample } from './gl/quality.js';
 import { createAudioEngine } from './audio/engine.js';
 import { createDirector, directorStep } from './audio/director.js';
@@ -25,6 +26,7 @@ import { simStep } from './sim/sim.js';
 import { prewarm } from './sim/prewarm.js';
 import { seedCivilization } from './sim/civ.js';
 import { loadFromStorage, saveToStorage, SAVE_KEY } from './sim/persist.js';
+import { createShade, stepShade, computeShadeRows } from './sim/shade.js';
 import { createParticles, stepParticles, breezeLanterns } from './sim/particles.js';
 import { sampleGrid, visualHeight } from './sim/sample.js';
 import { TUNING } from './sim/tuning.js';
@@ -65,15 +67,23 @@ function boot() {
     return;
   }
   renderer.getContext().getExtension('OES_texture_float_linear');
+  const lossLog = { lost: 0, restored: 0, lostAt: -1 };
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lossLog.lost++; if (lossLog.lostAt < 0) lossLog.lostAt = performance.now() / 1000; }, false);
+  canvas.addEventListener('webglcontextrestored', () => { lossLog.restored++; }, false);
   const caps = detectCaps(renderer);
 
-  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.enabled = !query.has('noshadow');
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  if (query.get('shadowtype') === 'basic') renderer.shadowMap.type = THREE.BasicShadowMap;   // diagnostic switch
   renderer.toneMapping = THREE.NoToneMapping;
 
   const simTex = createSimTextures(caps.floatLinear);
   SHARED.uSimTexA.value = simTex.texA;
   SHARED.uSimTexB.value = simTex.texB;
+  SHARED.uSimTexC.value = simTex.texC;
+  const shadeState = createShade();
+  computeShadeRows(world, SHARED.uSunDir.value.x, SHARED.uSunDir.value.y, SHARED.uSunDir.value.z, 0, 128);
+  packShadeTexture(world, simTex);
   packSimTextures(world, simTex);
 
   // --- scene ---
@@ -89,7 +99,8 @@ function boot() {
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffb878, 3.2);
   sun.position.copy(SHARED.uSunDir.value).multiplyScalar(30);
-  sun.castShadow = true;
+  const REALSHADOW = query.has('realshadow');   // GPU shadow maps lost the WebGL context on the phone GPU; heightfield shading is the default
+  sun.castShadow = REALSHADOW;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
   sc.left = -13; sc.right = 13; sc.top = 13; sc.bottom = -13; sc.near = 1; sc.far = 80;
@@ -99,7 +110,9 @@ function boot() {
 
   const grid = createGridGeometry();
   scene.add(createSkyDome());
-  scene.add(createIslandTop(grid, caps));
+  const islandTop = createIslandTop(grid, caps);
+  if (query.has('nocustomdepth')) islandTop.customDepthMaterial = null;
+  scene.add(islandTop);
   scene.add(createBasaltSkirt());
   scene.add(createWaterSurface(grid, caps));
   const flora = createFlora(caps, 3500);
@@ -115,12 +128,14 @@ function boot() {
   scene.add(cloudFx);
   const ringFx = createRingFx(world);
 
+  if (!REALSHADOW) scene.traverse((o) => { o.castShadow = false; o.receiveShadow = false; });
+
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(0, 0.5, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.minDistance = 9;
-  controls.maxDistance = 44;
+  controls.maxDistance = 58;
   controls.maxPolarAngle = 1.38;
   controls.update();
   controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
@@ -177,6 +192,9 @@ function boot() {
     renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
+    // Portrait phones: widen the vertical FOV so the whole island still fits across the narrow screen.
+    const a = camera.aspect;
+    camera.fov = a >= 1.2 ? 32 : 32 + (1.2 - Math.max(a, 0.45)) / 0.75 * 26;
     camera.updateProjectionMatrix();
     if (sceneTarget) sceneTarget.dispose();
     sceneTarget = createSceneTarget(Math.floor(w * pr), Math.floor(h * pr), caps);
@@ -188,18 +206,20 @@ function boot() {
   // Apply a quality tier (spec 2.3): pixel ratio, bokeh taps, shadow map, flora count, sim substeps per frame.
   function applyTier(i) {
     const q = QUALITY[TIER_NAMES[i]];
-    pr = Math.min(dprNow(), q.pr);
+    pr = query.has('pr') ? parseFloat(query.get('pr')) : Math.min(dprNow(), q.pr);
     maxSubsteps = q.substeps;
     if (post.material.defines.TAPS !== q.taps) { post.material.defines.TAPS = q.taps; post.material.needsUpdate = true; }
-    if (sun.shadow.mapSize.x !== q.shadow) {
-      sun.shadow.mapSize.set(q.shadow, q.shadow);
+    const shadowN = query.has('shadowsize') ? parseInt(query.get('shadowsize'), 10) : q.shadow;
+    if (REALSHADOW && sun.shadow.mapSize.x !== shadowN) {
+      sun.shadow.mapSize.set(shadowN, shadowN);
       if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     }
-    flora.count = Math.min(flora.userData.full, q.flora);
+    flora.count = query.has('flora') ? Math.min(flora.userData.full, parseInt(query.get('flora'), 10)) : Math.min(flora.userData.full, q.flora);
     resize();
   }
   window.addEventListener('resize', resize);
   applyTier(gov.tier);
+  if (camera.aspect < 0.9) { camera.position.multiplyScalar(1.2); controls.update(); }   // portrait phones: start a little further back
 
   const ATMO_KEYS = { KeyQ: 0, KeyW: 0.5, KeyE: 1 };
   window.addEventListener('keydown', (ev) => {
@@ -245,6 +265,9 @@ function boot() {
   }
   createPhotoButton(uiEl, takePhoto);
   const debugUi = DEBUG ? createDebugOverlay() : null;
+  const reporter = query.has('report') ? createReporter(renderer, canvas, {
+    tier: () => TIER_NAMES[gov.tier], loss: () => lossLog, villagers: () => world.civ.nV, structures: () => world.civ.nS, particles: () => particles.count,
+  }) : null;
   let rock0 = 0;
   const landSum = (a, b) => { let t = 0; for (let i = 0; i < a.length; i++) if (!world.mask[i]) t += a[i] + (b ? b[i] : 0); return t; };
   if (DEBUG) rock0 = landSum(world.elev, world.sediment);
@@ -264,6 +287,7 @@ function boot() {
   const SIM_SPEED = 2.0;      // sim seconds per real second
 
   function renderFrame() {
+    if (query.has('nopost')) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
     renderer.setRenderTarget(sceneTarget);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
@@ -277,15 +301,16 @@ function boot() {
     SHARED.uTime.value += dt;
     if (!photo.busy) { const nt = governorSample(gov, Math.min(rawDt, 0.2)); if (nt >= 0) applyTier(nt); }
 
-    const t0 = DEBUG ? performance.now() : 0;
+    const t0 = (DEBUG || query.has('report')) ? performance.now() : 0;
     let n = 0;
     if (!photo.paused) {
       simAcc += dt * SIM_SPEED;
       while (simAcc >= world.params.dt && n < maxSubsteps) { simStep(world); simAcc -= world.params.dt; n++; }
       if (n === 0 && simAcc > world.params.dt) simAcc = 0;
       if (n > 0) packSimTextures(world, simTex);
+      if (stepShade(world, shadeState, SHARED.uSunDir.value, 8)) packShadeTexture(world, simTex);
     }
-    const simMs = DEBUG ? performance.now() - t0 : 0;
+    const simMs = (DEBUG || query.has('report')) ? performance.now() - t0 : 0;
 
     controls.update();
     camSpeed += (camera.position.distanceTo(camPrev) / Math.max(dt, 1e-3) - camSpeed) * Math.min(1, dt * 6);
@@ -321,6 +346,7 @@ function boot() {
     world.params.ecoGrow = 1.3 - 0.6 * SHARED.uAurora.value - 0.3 * SHARED.uRain.value;
     post.material.uniforms.uFocusDist.value = camera.position.distanceTo(controls.target);
     if (!NORENDER) renderFrame();
+    if (reporter) { reporter.maybeShot(query.get('report') || 'phone', 10); reporter.tick(rawDt, simMs, renderer.info.programs.length); }
     if (photo.pending) { photo.pending = false; canvas.toBlob(finishPhoto, 'image/png'); }
     frame++;
     if (debugUi) {

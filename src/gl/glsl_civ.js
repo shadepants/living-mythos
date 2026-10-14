@@ -12,6 +12,8 @@ varying vec3 vLocalP;
 varying vec3 vLocalN;
 varying vec3 vWN;
 varying float vSeed;
+varying float vShade;
+uniform sampler2D uSimTexC;
 uniform float uNight;
 bool isPid(float pid, float id) { return abs(pid - id) < 0.5; }
 float partVis(float pid, float kind, float wP, float wI, float wM) {
@@ -64,6 +66,7 @@ export const GLSL_STRUCT_POS = /* glsl */`
   float kind = aKind.x;
   float slen = aKind.y;
   vec4 sB = simB(worldToUv(sBase.xz));
+  vShade = fetchBil(uSimTexC, worldToUv(sBase.xz)).r;
   float bias = mix(aInstanceState.x, sB.a, 0.75);
   float build = clamp(aInstanceState.y, 0.0, 1.0);
   float decay = aInstanceState.z;
@@ -144,6 +147,7 @@ varying vec3 vLocalP;
 varying vec3 vLocalN;
 varying vec3 vWN;
 varying float vSeed;
+varying float vShade;
 uniform float uNight;
 `;
 
@@ -182,12 +186,20 @@ export const GLSL_STRUCT_FRAG_EMISSIVE = /* glsl */`
   totalEmissiveRadiance += vSGlow + glyphGlow + vec3(1.0, 0.62, 0.26) * winGlow * (0.12 + uNight * 1.6);
 `;
 
+export const GLSL_SHADE_FRAG = /* glsl */`
+  #include <lights_fragment_end>
+  reflectedLight.directDiffuse *= vShade;
+  reflectedLight.directSpecular *= vShade;
+`;
+
 // ---------------- villagers ----------------
 export const GLSL_VILL_PARS = /* glsl */`
 attribute vec4 aInstanceState;
 attribute vec2 aPart;
 varying vec3 vVCol;
 varying vec3 vVGlow;
+varying float vShade;
+uniform sampler2D uSimTexC;
 uniform float uNight;
 vec3 lin2(vec3 c) { return pow(c, vec3(2.2)); }
 `;
@@ -199,6 +211,7 @@ export const GLSL_VILL_POS = /* glsl */`
   float lant = aInstanceState.w;
   float vpid = aPart.x;
   float vyn = aPart.y;
+  vShade = texture(uSimTexC, (instanceMatrix[3].xz + 10.0) / 20.0).r;
   vec3 lp = position;
   lp.x += sin(phase) * 0.05 * vyn;
   if (abs(vpid - 3.0) < 0.5) {

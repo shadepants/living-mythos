@@ -5,6 +5,8 @@ attribute vec4 aInstanceState;
 attribute vec2 aPart;
 varying vec3 vFloraCol;
 varying vec3 vGlow;
+varying float vShade;
+uniform sampler2D uSimTexC;
 uniform vec4 uCloud;
 uniform vec4 uBreeze;
 uniform float uWind;
@@ -21,6 +23,7 @@ export const GLSL_FLORA_VERT_POS = /* glsl */`
   vec3 fBase = instanceMatrix[3].xyz;
   vec2 fUv = worldToUv(fBase.xz);
   vec4 fA = simA(fUv);
+  vShade = fetchBil(uSimTexC, fUv).r;
   vec4 fB = simB(fUv);
   float fert = fB.g, comp = fB.b, bias = fB.a, wat = fA.g;
   float arche = aInstanceState.x, grow = aInstanceState.y;
@@ -70,4 +73,10 @@ export const GLSL_FLORA_FRAG_COLOR = /* glsl */`
 export const GLSL_FLORA_FRAG_EMISSIVE = /* glsl */`
   #include <emissivemap_fragment>
   totalEmissiveRadiance += vGlow;
+`;
+
+export const GLSL_FLORA_SHADE = /* glsl */`
+  #include <lights_fragment_end>
+  reflectedLight.directDiffuse *= vShade;
+  reflectedLight.directSpecular *= vShade;
 `;

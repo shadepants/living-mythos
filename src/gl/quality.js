@@ -15,11 +15,13 @@ export function pickInitialTier(env) {
 }
 
 export function createGovernor(tier) {
-  return { tier, ema: 0.016, slow: 0, budget: 0.024, window: 2.0 };
+  return { tier, ema: 0.016, slow: 0, budget: 0.024, window: 2.0, warm: 4.0 };   // warm: ignore start-up hitches (shader compile, first uploads)
 }
 
 // Feed every frame's dt. Returns the new tier index when it drops one, else -1.
 export function governorSample(g, dt) {
+  if (g.warm > 0) { g.warm -= dt; return -1; }
+  if (dt > 0.1) dt = 0.1;                        // one hitch is not a trend
   g.ema += (dt - g.ema) * 0.1;
   if (g.ema > g.budget) g.slow += dt; else g.slow = Math.max(0, g.slow - dt * 2);
   if (g.slow > g.window && g.tier > 0) {

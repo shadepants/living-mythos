@@ -5,6 +5,7 @@ import { GRID_W, GRID_H, GRID_N } from '../sim/grid.js';
 export function createSimTextures(floatLinear) {
   const bufA = new Float32Array(GRID_N * 4);
   const bufB = new Float32Array(GRID_N * 4);
+  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows)
   const filter = floatLinear ? THREE.LinearFilter : THREE.NearestFilter;
   const make = (buf) => {
     const t = new THREE.DataTexture(buf, GRID_W, GRID_H, THREE.RGBAFormat, THREE.FloatType);
@@ -14,7 +15,7 @@ export function createSimTextures(floatLinear) {
     t.needsUpdate = true;
     return t;
   };
-  return { bufA, bufB, texA: make(bufA), texB: make(bufB) };
+  return { bufA, bufB, bufC, texA: make(bufA), texB: make(bufB), texC: make(bufC) };
 }
 
 // A: elev, water, vx, vz   B: moisture, fertility, compaction, culturalBias
@@ -27,4 +28,11 @@ export function packSimTextures(world, st) {
   }
   st.texA.needsUpdate = true;
   st.texB.needsUpdate = true;
+}
+
+// Shade factor (0 shadowed .. 1 lit) from the CPU heightfield march, into R of uSimTexC.
+export function packShadeTexture(world, st) {
+  const sh = world.shade, c = st.bufC;
+  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) c[j] = sh[i];
+  st.texC.needsUpdate = true;
 }

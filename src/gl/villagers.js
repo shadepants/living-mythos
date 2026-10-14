@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SHARED } from './shared.js';
-import { GLSL_VILL_PARS, GLSL_VILL_POS, GLSL_VILL_FRAG_COLOR, GLSL_VILL_FRAG_EMISSIVE } from './glsl_civ.js';
+import { GLSL_VILL_PARS, GLSL_VILL_POS, GLSL_VILL_FRAG_COLOR, GLSL_VILL_FRAG_EMISSIVE, GLSL_SHADE_FRAG } from './glsl_civ.js';
 import { kitNew, kitBox, kitFrustum, kitPyramid, kitFinish } from './geomkit.js';
 import { sampleGrid } from '../sim/sample.js';
 import { ST_PROCESSION, ST_GREET, ROLE_MYSTIC } from '../sim/civ.js';
@@ -29,13 +29,15 @@ export function createVillagers(caps) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0, side: THREE.DoubleSide });
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = SHARED.uNight;
+    shader.uniforms.uSimTexC = SHARED.uSimTexC;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${GLSL_VILL_PARS}`)
       .replace('#include <begin_vertex>', GLSL_VILL_POS);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vVCol;\nvarying vec3 vVGlow;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vVCol;\nvarying vec3 vVGlow;\nvarying float vShade;')
       .replace('#include <color_fragment>', GLSL_VILL_FRAG_COLOR)
-      .replace('#include <emissivemap_fragment>', GLSL_VILL_FRAG_EMISSIVE);
+      .replace('#include <emissivemap_fragment>', GLSL_VILL_FRAG_EMISSIVE)
+      .replace('#include <lights_fragment_end>', GLSL_SHADE_FRAG);
   };
   const mesh = new THREE.InstancedMesh(geo, mat, n);
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

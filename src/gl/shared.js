@@ -4,6 +4,7 @@ import * as THREE from 'three';
 export const SHARED = {
   uSimTexA: { value: null },
   uSimTexB: { value: null },
+  uSimTexC: { value: null },
   uTime: { value: 0 },
   uCell: { value: 20 / 128 },
   uSunDir: { value: new THREE.Vector3(-0.55, 0.42, 0.7).normalize() },

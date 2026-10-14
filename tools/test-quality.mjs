@@ -20,14 +20,15 @@ check('boot: ?q= overrides detection', pickInitialTier({ override: 'low', coarse
   const g = createGovernor(2);
   let t = 0, first = -1, tiers = [];
   for (let i = 0; i < 25 * 60; i++) { t += 0.04; const r = governorSample(g, 0.04); if (r >= 0) { tiers.push(r); if (first < 0) first = t; } }
-  check('governor: sustained 25 fps steps down one tier at a time after ~2 s', tiers[0] === 1 && first > 1.8 && first < 4, `first drop at ${first.toFixed(1)} s, then ${tiers}`);
+  check('governor: sustained 25 fps steps down one tier at a time (after the 4 s warm-up + ~2 s)', tiers[0] === 1 && first > 5.8 && first < 8.5, `first drop at ${first.toFixed(1)} s, then ${tiers}`);
   check('governor: keeps stepping down while slow, then stops at low', g.tier === 0 && tiers.join() === '1,0', `tiers ${tiers}`);
 }
 {
   const g = createGovernor(2);
   let drops = 0;
   for (let i = 0; i < 600; i++) { const dt = i % 100 === 0 ? 0.2 : 0.016; if (governorSample(g, dt) >= 0) drops++; }
-  check('governor: an occasional hitch does not downgrade', drops === 0);
+  check('governor: a start-up compile hitch (1.2 s frame) does not downgrade', (() => { const g = createGovernor(1); let d = 0; if (governorSample(g, 1.2) >= 0) d++; for (let i = 0; i < 600; i++) if (governorSample(g, 0.016) >= 0) d++; return d === 0; })());
+check('governor: an occasional hitch does not downgrade', drops === 0);
 }
 check('tier names', TIER_NAMES.join() === 'low,mid,high');
 if (failed) { console.error(`${failed} quality test(s) failed`); process.exit(1); }

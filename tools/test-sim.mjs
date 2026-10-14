@@ -6,6 +6,7 @@ import { simStep } from '../src/sim/sim.js';
 import { ecologyStep } from '../src/sim/ecology.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { Rng } from '../src/sim/rng.js';
+import { computeShadeRows } from '../src/sim/shade.js';
 import { createParticles, stepParticles, breezeLanterns, PARTICLE_CAP, P_ROCK, P_LANTERN, P_RAIN, P_SPRAY, P_EMBER } from '../src/sim/particles.js';
 import { emitEvent, EV_ROCKFALL, EV_DUST, EV_LANTERN } from '../src/sim/events.js';
 import { seedCivilization, civStep, KIND_BRIDGE, KIND_DWELLING, KIND_MYTH, ROLE_MYSTIC, ST_BUILD, recordMyth, MYTH_FLOOD, MYTH_MAX } from '../src/sim/civ.js';
@@ -397,6 +398,26 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   const grew = process.memoryUsage().heapUsed - h0;
   check('zero-GC: stepParticles does not grow the heap', grew < 256 * 1024, `${(grew / 1024).toFixed(1)} KB`);
   void P_SPRAY;
+}
+
+// 5g. heightfield sun shadows
+{
+  const w = createWorld(9);
+  w.elev.fill(0.3); for (let i = 0; i < GRID_N; i++) if (w.mask[i]) w.elev[i] = -0.6;
+  // a tall hill at the centre
+  for (let z = 0; z < 128; z++) for (let x = 0; x < 128; x++) { const d = Math.hypot(x - 64, z - 64); if (d < 8) w.elev[z * 128 + x] = 0.3 + (8 - d) * 0.25; }
+  const cell = (wx, wz) => Math.round((wz + 10) / 20 * 128 - 0.5) * 128 + Math.round((wx + 10) / 20 * 128 - 0.5);
+  computeShadeRows(w, -0.8, 0.35, 0, 0, 128);              // sun low in the -x direction
+  const east = w.shade[cell(1.5, 0)], west = w.shade[cell(-1.5, 0)], far = w.shade[cell(4, 4)];
+  check('shade: ground on the far side of a hill is shadowed', east < 0.2, `east ${east.toFixed(2)}`);
+  check('shade: ground on the sunny side and far from the hill is lit', west > 0.95 && far > 0.95, `west ${west.toFixed(2)} far ${far.toFixed(2)}`);
+  computeShadeRows(w, 0, 1, 0, 0, 128);                    // sun straight overhead
+  let minS = 1; for (let i = 0; i < GRID_N; i++) if (w.shade[i] < minS) minS = w.shade[i];
+  check('shade: nothing is shadowed with the sun overhead', minS > 0.99, `min ${minS.toFixed(2)}`);
+  const t0 = performance.now(); computeShadeRows(w, -0.8, 0.35, 0.3, 0, 128); const ms = performance.now() - t0;
+  check('shade: a full sweep is cheap enough to amortise (<60 ms)', ms < 60, `${ms.toFixed(1)} ms`);
+  let ok = true; for (let i = 0; i < GRID_N; i++) if (!(w.shade[i] >= 0 && w.shade[i] <= 1)) ok = false;
+  check('shade: values stay in [0,1]', ok);
 }
 
 // 6. prewarm produces a believable island

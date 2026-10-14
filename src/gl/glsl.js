@@ -142,6 +142,14 @@ export const GLSL_ISLAND_FRAG_EMISSIVE = /* glsl */`
   totalEmissiveRadiance += ringGlow;
 `;
 
+// Sun-only shadowing from the CPU heightfield march: ambient light is untouched.
+export const GLSL_ISLAND_SHADE = /* glsl */`
+  #include <lights_fragment_end>
+  float shadeF = fetchBil(uSimTexC, vSimUv).r;
+  reflectedLight.directDiffuse *= shadeF;
+  reflectedLight.directSpecular *= shadeF;
+`;
+
 export const GLSL_ISLAND_FRAG_ROUGH = /* glsl */`
   float roughnessFactor = mix(roughness, 0.26, clamp(wetTerr + uWet * 0.7, 0.0, 1.0));
 `;

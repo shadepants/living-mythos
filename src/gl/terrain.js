@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { SHARED } from './shared.js';
 import {
   GLSL_SIM, GLSL_TERRAIN_HEIGHT, GLSL_ISLAND_VERT_NORMAL, GLSL_ISLAND_VERT_POS,
-  GLSL_ISLAND_FRAG_COLOR, GLSL_ISLAND_FRAG_ROUGH, GLSL_ISLAND_FRAG_EMISSIVE, GLSL_WATER_VERT, GLSL_WATER_FRAG,
+  GLSL_ISLAND_FRAG_COLOR, GLSL_ISLAND_FRAG_ROUGH, GLSL_ISLAND_FRAG_EMISSIVE, GLSL_ISLAND_SHADE, GLSL_WATER_VERT, GLSL_WATER_FRAG,
 } from './glsl.js';
 import { GRID_W, GRID_H, CELL_SIZE } from '../sim/grid.js';
 import { hash2 } from '../sim/noise.js';
@@ -41,6 +41,7 @@ export function createGridGeometry() {
 function addSimUniforms(shader) {
   shader.uniforms.uSimTexA = SHARED.uSimTexA;
   shader.uniforms.uSimTexB = SHARED.uSimTexB;
+  shader.uniforms.uSimTexC = SHARED.uSimTexC;
   shader.uniforms.uTime = SHARED.uTime;
   shader.uniforms.uCell = SHARED.uCell;
   shader.uniforms.uWet = SHARED.uWet;
@@ -60,10 +61,11 @@ export function createIslandTop(grid, caps) {
       .replace('#include <beginnormal_vertex>', GLSL_ISLAND_VERT_NORMAL)
       .replace('#include <begin_vertex>', GLSL_ISLAND_VERT_POS);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;\nvarying vec2 vSimUv;\nuniform float uWet;\nuniform vec4 uRingA[8];\nuniform vec4 uRingB[8];\nuniform vec4 uGlow[24];\nuniform float uNight;\n${GLSL_SIM}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;\nvarying vec2 vSimUv;\nuniform float uWet;\nuniform vec4 uRingA[8];\nuniform vec4 uRingB[8];\nuniform vec4 uGlow[24];\nuniform float uNight;\nuniform sampler2D uSimTexC;\n${GLSL_SIM}`)
       .replace('#include <color_fragment>', GLSL_ISLAND_FRAG_COLOR)
       .replace('#include <roughnessmap_fragment>', GLSL_ISLAND_FRAG_ROUGH)
-      .replace('#include <emissivemap_fragment>', GLSL_ISLAND_FRAG_EMISSIVE);
+      .replace('#include <emissivemap_fragment>', GLSL_ISLAND_FRAG_EMISSIVE)
+      .replace('#include <lights_fragment_end>', GLSL_ISLAND_SHADE);
   };
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   if (!caps.floatLinear) depth.defines = { MANUAL_BILINEAR: '' };

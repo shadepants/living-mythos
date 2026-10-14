@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { SHARED } from './shared.js';
 import { GLSL_SIM, GLSL_TERRAIN_HEIGHT } from './glsl.js';
-import { GLSL_STRUCT_PARS, GLSL_STRUCT_NORMAL, GLSL_STRUCT_POS, GLSL_STRUCT_FRAG_PARS, GLSL_STRUCT_FRAG_COLOR, GLSL_STRUCT_FRAG_EMISSIVE } from './glsl_civ.js';
+import { GLSL_STRUCT_PARS, GLSL_STRUCT_NORMAL, GLSL_STRUCT_POS, GLSL_STRUCT_FRAG_PARS, GLSL_STRUCT_FRAG_COLOR, GLSL_STRUCT_FRAG_EMISSIVE, GLSL_SHADE_FRAG } from './glsl_civ.js';
 import { kitNew, kitBox, kitFrustum, kitPyramid, kitRoof, kitFinish } from './geomkit.js';
 import { KIND_DWELLING, KIND_MONOLITH, KIND_BRIDGE, KIND_STEPS, KIND_PAVING, KIND_MYTH } from '../sim/civ.js';
 import { TUNING } from '../sim/tuning.js';
@@ -104,7 +104,7 @@ export function createStructures(caps) {
   if (!caps.floatLinear) mat.defines = { MANUAL_BILINEAR: '' };
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uSimTexA = SHARED.uSimTexA; shader.uniforms.uSimTexB = SHARED.uSimTexB;
-    shader.uniforms.uTime = SHARED.uTime; shader.uniforms.uCell = SHARED.uCell; shader.uniforms.uNight = SHARED.uNight;
+    shader.uniforms.uSimTexC = SHARED.uSimTexC; shader.uniforms.uTime = SHARED.uTime; shader.uniforms.uCell = SHARED.uCell; shader.uniforms.uNight = SHARED.uNight;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${GLSL_SIM}\n${GLSL_TERRAIN_HEIGHT}\n${GLSL_STRUCT_PARS}`)
       .replace('#include <beginnormal_vertex>', GLSL_STRUCT_NORMAL)
@@ -112,7 +112,8 @@ export function createStructures(caps) {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${GLSL_SIM}\n${GLSL_STRUCT_FRAG_PARS}`)
       .replace('#include <color_fragment>', GLSL_STRUCT_FRAG_COLOR)
-      .replace('#include <emissivemap_fragment>', GLSL_STRUCT_FRAG_EMISSIVE);
+      .replace('#include <emissivemap_fragment>', GLSL_STRUCT_FRAG_EMISSIVE)
+      .replace('#include <lights_fragment_end>', GLSL_SHADE_FRAG);
   };
 
   const mesh = new THREE.InstancedMesh(geo, mat, cap);
