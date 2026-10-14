@@ -1,7 +1,7 @@
 # Living Mythos — build notes
 
 ## Status
-- **Current milestone:** M10 done and VERIFIED ON THE DEVICE: it runs on the Pixel's own GPU (PowerVR D-Series DXT-48-1536, ANGLE/GLES 3.2) at ~59 fps average with no WebGL context loss over a 150 s soak and no errors; frames from that GPU are in `docs/screens/phone-portrait.png`. Still unverified: real finger-touch feel (touch logic is covered by synthetic touch events in `npm run interact`).
+- **Current milestone:** M10 done and VERIFIED ON THE DEVICE: it runs on the Pixel's own GPU (PowerVR D-Series DXT-48-1536, ANGLE/GLES 3.2) at ~59 fps average with no WebGL context loss over a 150 s soak and no errors; frames from that GPU are in `docs/screens/phone-portrait.png`. Real finger touch was verified on the device too (see below).
 - **Headless Chrome (OLD, superseded below):** `~/.cache/ms-playwright/chromium_headless_shell-*` exists; `tools/smoke.mjs`
   drives it via puppeteer-core. SwiftShader's GPU process **segfaults ~1s after the first draw in this PRoot**
   (every flag combo tried), so there are **no screenshots/pixel checks**. But shader compile/link errors and JS
@@ -96,3 +96,9 @@ across all modules (flat scope after inlining; build fails on duplicates); no im
 - Diagnostic switches (all harmless): `?pr=1.0` pixel ratio, `?flora=N`, `?nopost=1`, `?noshadow=1`, `?shadowtype=basic`, `?shadowsize=N`, `?nocustomdepth=1`, `?realshadow=1`, `?q=low|mid|high`, `?norender=1` (with debug).
 - Portrait: the island was cropped on a tall phone; vertical FOV widens from 32 to 58 deg as the aspect drops below 1.2 and the camera starts 20% further back; max distance 58.
 - Quality governor now ignores the first 4 s (shader-compile hitches had demoted the phone to `low` at t=4 s).
+
+## Real touch on the phone (verified 2026-10-14)
+Instrumented controller (`ctl.st.stats`, included in `?report` posts). Two live sessions with a person touching the Pixel:
+- Session 1 (70 s): 190 touch-downs, 50 taps recognised as tool taps, 1 long-press carve, 50 drags, 27 multi-touch events; camera distance went 35 -> 27.9 -> 58 (pinch zoom out clamped at maxDistance 58); sculpt, cloud and breeze tools used from the dock; fps avg 64, min 52; 0 errors, no context loss.
+- Session 2 (50 s, scripted routine): Monolith tool selected from the dock and 3 monoliths placed by tap; 2 long-press carves ('hold-carve'); 8 one-finger drags (orbit) and 4 pinch gestures; camera distance 9.2 (minDistance reached) to 57.8 (max); fps avg 64.4, min 54.4; tier stayed mid; 0 errors; context never lost.
+Not covered: palm rejection / very long sessions / other devices.

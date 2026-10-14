@@ -19,10 +19,13 @@ export function createController(o) {
     lastX: 0, lastY: 0, hasPointer: false, hitOk: false,
     hit: { x: 0, y: 0, z: 0 }, spos: new Float64Array(3), svel: new Float64Array(3), sInit: false,
     alpha: 0, cloudVis: 0, rainAmt: 0, breezeAmt: 0,
+    stats: { touchDown: 0, mouseDown: 0, tap: 0, hold: 0, multi: 0, moved: 0, onIsland: 0, offIsland: 0, pinch: 0, orbit: 0, log: [] },
     sculptClock: 0, rockClock: 0, dropClock: 0, chimeClock: 0, placedThisPress: false, radius: 1.5,
   };
   const v = new THREE.Vector3(), dir = new THREE.Vector3();
   const cA = new THREE.Color(1.0, 0.78, 0.38), cB = new THREE.Color(0.55, 0.6, 1.0), cC = new THREE.Color(0.45, 0.9, 1.0), cD = new THREE.Color(1.0, 0.85, 0.45), cE = new THREE.Color(0.7, 1.0, 0.85);
+
+  const note = (what) => { const L = st.stats.log; if (L.length >= 40) L.shift(); L.push(what + '@' + Math.round(performance.now() / 100) / 10); };
 
   function pick(clientX, clientY) {
     const r = canvas.getBoundingClientRect();
@@ -49,6 +52,7 @@ export function createController(o) {
     st.lastX = e.clientX; st.lastY = e.clientY; st.hasPointer = true;
     const touch = e.pointerType === 'touch' || e.pointerType === 'pen';
     st.isTouch = touch;
+    if (touch) st.stats.touchDown++; else st.stats.mouseDown++;
     if (!touch) {
       const onIsland = pick(e.clientX, e.clientY);
       const modifier = e.ctrlKey || e.altKey || e.metaKey;
@@ -58,18 +62,19 @@ export function createController(o) {
       return;
     }
     st.touches++;
-    if (st.touches > 1) { clearTimeout(st.holdTimer); st.downT = 0; endAction(); return; }   // pinch / two-finger pan belongs to the camera
+    if (st.touches > 1) { st.stats.multi++; note('multi-touch'); clearTimeout(st.holdTimer); st.downT = 0; endAction(); return; }   // pinch / two-finger pan belongs to the camera
     st.downX = e.clientX; st.downY = e.clientY; st.downT = performance.now(); st.moved = false;
     clearTimeout(st.holdTimer);
     if (pick(e.clientX, e.clientY)) {
-      st.holdTimer = setTimeout(() => { if (st.touches === 1 && !st.moved && pick(st.lastX, st.lastY)) beginAction(true); }, HOLD_MS);
-    }
+      st.stats.onIsland++;
+      st.holdTimer = setTimeout(() => { if (st.touches === 1 && !st.moved && pick(st.lastX, st.lastY)) { st.stats.hold++; note('hold-carve'); beginAction(true); } }, HOLD_MS);
+    } else st.stats.offIsland++;
   }
 
   function onMove(e) {
     st.lastX = e.clientX; st.lastY = e.clientY; st.hasPointer = true;
     if (st.isTouch && st.touches === 1 && !st.moved && Math.hypot(e.clientX - st.downX, e.clientY - st.downY) > MOVE_PX) {
-      st.moved = true; clearTimeout(st.holdTimer);
+      st.moved = true; st.stats.moved++; note('drag'); clearTimeout(st.holdTimer);
     }
   }
 
@@ -80,7 +85,7 @@ export function createController(o) {
     if (st.active) { endAction(); return; }
     // a quick, stationary single touch is a tap with the current tool
     if (st.touches === 0 && st.downT && !st.moved && performance.now() - st.downT < TAP_MS) {
-      if (pick(e.clientX, e.clientY)) tapAction();
+      if (pick(e.clientX, e.clientY)) { st.stats.tap++; note('tap:tool' + st.tool); tapAction(); }
     }
     st.downT = 0;
     if (st.touches === 0) { controls.enabled = true; st.hasPointer = st.isTouch ? false : st.hasPointer; }

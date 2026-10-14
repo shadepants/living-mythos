@@ -266,7 +266,8 @@ function boot() {
   createPhotoButton(uiEl, takePhoto);
   const debugUi = DEBUG ? createDebugOverlay() : null;
   const reporter = query.has('report') ? createReporter(renderer, canvas, {
-    tier: () => TIER_NAMES[gov.tier], loss: () => lossLog, villagers: () => world.civ.nV, structures: () => world.civ.nS, particles: () => particles.count,
+    tier: () => TIER_NAMES[gov.tier], loss: () => lossLog,
+    input: () => ({ ...ctl.st.stats, log: ctl.st.stats.log.slice(-12), camDist: +camera.position.distanceTo(controls.target).toFixed(1), tool: ctl.st.tool, monoliths: world.monoliths.filter((v, i) => i % 4 === 3 && v).length, cursorA: +ctl.st.alpha.toFixed(2) }), villagers: () => world.civ.nV, structures: () => world.civ.nS, particles: () => particles.count,
   }) : null;
   let rock0 = 0;
   const landSum = (a, b) => { let t = 0; for (let i = 0; i < a.length; i++) if (!world.mask[i]) t += a[i] + (b ? b[i] : 0); return t; };

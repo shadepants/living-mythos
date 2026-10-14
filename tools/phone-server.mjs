@@ -19,7 +19,7 @@ http.createServer((req, res) => {
         const name = (url.searchParams.get('name') || 'shot').replace(/[^\w-]/g, '');
         writeFileSync(join(out, name + '.png'), Buffer.from(body.split(',')[1] || '', 'base64'));
         console.log('shot saved', name);
-      } else { appendFileSync(log, body + '\n'); const r = JSON.parse(body); console.log(`t=${r.t}s fps=${r.fps} frame=${r.frameMs}ms worst=${r.worstMs} sim=${r.simMs}ms tier=${r.tier} programs=${r.programs} gpu="${r.gpu}" errors=${r.errors.length}`); if (r.errors.length) console.log('  ERR', r.errors.join(' | ')); }
+      } else { appendFileSync(log, body + '\n'); const r = JSON.parse(body); console.log(`t=${r.t}s fps=${r.fps} frame=${r.frameMs}ms worst=${r.worstMs} sim=${r.simMs}ms tier=${r.tier} programs=${r.programs} gpu="${r.gpu}" errors=${r.errors.length}` + (r.input ? ` | touch: down=${r.input.touchDown} tap=${r.input.tap} hold=${r.input.hold} drag=${r.input.moved} multi=${r.input.multi} camDist=${r.input.camDist} tool=${r.input.tool}` : '')); if (r.errors.length) console.log('  ERR', r.errors.join(' | ')); }
       res.writeHead(204); res.end();
     });
     return;
