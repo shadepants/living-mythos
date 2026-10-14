@@ -1,0 +1,11 @@
+{
+  "name": "living-mythos",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "test": "node tools/test-sim.mjs",
+    "check": "node tools/build.mjs && node tools/audit.mjs"
+  }
+}
