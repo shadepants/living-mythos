@@ -1,8 +1,14 @@
 # Living Mythos — build notes
 
 ## Status
-- **Current milestone:** M1 done (sim core, Node-verified). Next: M2 (terrain + water render).
-- **Verification so far:** build + static audit + `node --check` of the inlined bundle pass.
+- **Current milestone:** M2 built (terrain, water, skirt, shadows, composite). Compile-verified, NOT visually verified.
+- **Headless Chrome (important):** `~/.cache/ms-playwright/chromium_headless_shell-*` exists; `tools/smoke.mjs`
+  drives it via puppeteer-core. SwiftShader's GPU process **segfaults ~1s after the first draw in this PRoot**
+  (every flag combo tried), so there are **no screenshots/pixel checks**. But shader compile/link errors and JS
+  exceptions DO surface first (verified by injecting a deliberate GLSL error), and `?debug=1` logs
+  `programs compiled: N` (expect 6 from M2). So: smoke = compile + boot check; the user must eyeball visuals.
+- `tools/test-geo.mjs` checks grid winding and skirt geometry in Node (three is a devDependency).
+- (old) Verification at M0: build + static audit + `node --check` of the inlined bundle pass.
   **Not yet run in a browser** (no Chromium in this PRoot). Open `dist/index.html` on-device
   (or `python3 -m http.server` in `dist/`) and expect a rotating normal-shaded octahedron on a dark
   purple background. Add `?debug=1` to log detected GL caps to the console.

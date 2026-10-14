@@ -1,0 +1,214 @@
+// Shared GLSL snippets. Colours are authored in sRGB and linearised with lin().
+export const GLSL_SIM = /* glsl */`
+uniform sampler2D uSimTexA;
+uniform sampler2D uSimTexB;
+uniform float uTime;
+uniform float uCell;
+vec2 worldToUv(vec2 xz) { return (xz + 10.0) / 20.0; }
+vec4 fetchBil(sampler2D t, vec2 uv) {
+#ifdef MANUAL_BILINEAR
+  vec2 p = uv * 128.0 - 0.5;
+  vec2 f = fract(p);
+  vec2 i = (floor(p) + 0.5) / 128.0;
+  float s = 1.0 / 128.0;
+  vec4 a = texture(t, i), b = texture(t, i + vec2(s, 0.0));
+  vec4 c = texture(t, i + vec2(0.0, s)), d = texture(t, i + vec2(s, s));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+#else
+  return texture(t, uv);
+#endif
+}
+vec4 simA(vec2 uv) { return fetchBil(uSimTexA, uv); }
+vec4 simB(vec2 uv) { return fetchBil(uSimTexB, uv); }
+vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
+}
+`;
+
+// Elevation with the perimeter collapsed onto the cliff ring (r = 9.2) so the basalt skirt meets it exactly.
+export const GLSL_TERRAIN_HEIGHT = /* glsl */`
+float terrainHeight(vec2 xz, out vec2 pxz) {
+  float r = length(xz) / 10.0;
+  float rc = min(r, 0.92);
+  pxz = r > 0.0001 ? xz * (rc / r) : xz;
+  float e = simA(worldToUv(pxz)).r;
+  return mix(e, -0.6, smoothstep(0.895, 0.92, r));
+}
+float terrainH(vec2 xz) { vec2 d; return terrainHeight(xz, d); }
+`;
+
+export const GLSL_ISLAND_VERT_NORMAL = /* glsl */`
+  vec2 sPxz;
+  float sElev = terrainHeight(position.xz, sPxz);
+  float eL = terrainH(sPxz - vec2(uCell, 0.0));
+  float eR = terrainH(sPxz + vec2(uCell, 0.0));
+  float eU = terrainH(sPxz - vec2(0.0, uCell));
+  float eD = terrainH(sPxz + vec2(0.0, uCell));
+  vec3 objectNormal = normalize(vec3(eL - eR, 2.0 * uCell, eU - eD));
+`;
+
+export const GLSL_ISLAND_VERT_POS = /* glsl */`
+  vec3 transformed = vec3(sPxz.x, sElev, sPxz.y);
+  vWP = transformed;
+  vSimUv = worldToUv(sPxz);
+`;
+
+export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
+  vec4 tA = simA(vSimUv);
+  vec4 tB = simB(vSimUv);
+  float elevF = vWP.y;
+  float upN = normalize(vNormal).y;
+  float steep = 1.0 - smoothstep(0.55, 0.88, upN);
+  float rr = length(vWP.xz) / 10.0;
+
+  vec3 clayLo = lin(vec3(0.58, 0.40, 0.28));
+  vec3 clayHi = lin(vec3(0.82, 0.68, 0.48));
+  vec3 basalt = lin(vec3(0.20, 0.20, 0.24));
+  vec3 dryOchre = lin(vec3(0.66, 0.54, 0.30));
+  vec3 lush = lin(vec3(0.20, 0.52, 0.26));
+  float hq = floor(elevF * 8.0) / 8.0;
+  vec3 col = mix(clayLo, clayHi, clamp(hq / 1.2, 0.0, 1.0));
+  float fert = clamp(tB.g, 0.0, 1.0) * (1.0 - tB.b * 0.8);
+  vec3 greens = mix(dryOchre, lush, smoothstep(0.3, 0.75, fert));
+  col = mix(col, greens, smoothstep(0.1, 0.5, fert) * (1.0 - steep));
+  col = mix(col, basalt, clamp(steep * 1.4 + smoothstep(0.83, 0.9, rr) * 0.9, 0.0, 1.0));
+  col = mix(col, lin(vec3(0.34, 0.25, 0.18)), smoothstep(0.15, 0.6, tB.b) * 0.85);
+
+  // stepped clay contour terraces (screen-space antialiased)
+  float th = elevF * 9.0;
+  float tf = fract(th);
+  float fw = fwidth(th) + 1e-4;
+  float lodFade = 1.0 - smoothstep(0.25, 0.6, fw);
+  float lineMask = smoothstep(0.0, fw * 1.5, tf) * (1.0 - smoothstep(1.0 - fw * 1.5, 1.0, tf));
+  col *= mix(1.0, mix(0.80, 1.0, lineMask), lodFade);
+  float bev = smoothstep(fw, fw * 2.5, tf) * (1.0 - smoothstep(fw * 2.5, fw * 5.0, tf));
+  col += 0.05 * bev * (1.0 - steep) * lodFade;
+
+  // cavity AO / ridge highlight from the heightfield laplacian
+  float tx = 2.0 / 128.0;
+  float lap = (simA(vSimUv + vec2(tx, 0.0)).r + simA(vSimUv - vec2(tx, 0.0)).r
+             + simA(vSimUv + vec2(0.0, tx)).r + simA(vSimUv - vec2(0.0, tx)).r) * 0.25 - tA.r;
+  float cav = clamp(lap * 14.0, -0.5, 0.5);
+  col *= 1.0 - 0.4 * max(cav, 0.0);
+  col += 0.05 * max(-cav, 0.0);
+
+  // wet shoreline / soaked soil
+  float wetTerr = clamp(tA.g * 14.0 + tB.r * 0.6, 0.0, 1.0);
+  col *= 1.0 - 0.45 * wetTerr;
+  diffuseColor.rgb = col;
+`;
+
+export const GLSL_ISLAND_FRAG_ROUGH = /* glsl */`
+  float roughnessFactor = mix(roughness, 0.32, wetTerr);
+`;
+
+export const GLSL_WATER_VERT = /* glsl */`
+varying vec3 vWP;
+varying vec2 vUv;
+${GLSL_SIM}
+void main() {
+  vec2 xz = position.xz;
+  float r = length(xz) / 10.0;
+  float rc = min(r, 0.92);
+  vec2 pxz = r > 0.0001 ? xz * (rc / r) : xz;
+  vec4 a = simA(worldToUv(pxz));
+  float y = mix(a.r + a.g + 0.004, -0.6, smoothstep(0.895, 0.92, r));
+  vWP = vec3(pxz.x, y, pxz.y);
+  vUv = worldToUv(pxz);
+  gl_Position = projectionMatrix * viewMatrix * vec4(vWP, 1.0);
+}
+`;
+
+export const GLSL_WATER_FRAG = /* glsl */`
+precision highp float;
+varying vec3 vWP;
+varying vec2 vUv;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform vec3 uSkyTop;
+uniform vec3 uSkyHor;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+${GLSL_SIM}
+void main() {
+  vec4 a = simA(vUv);
+  float d = a.g;
+  if (d < 0.008) discard;
+  float t = uTime;
+  vec2 flow = a.ba;
+  float spd = length(flow);
+
+  // surface normal from the water+bed height field, plus flow-advected ripples
+  float s = 1.0 / 128.0;
+  float hL = simA(vUv - vec2(s, 0.0)).r + simA(vUv - vec2(s, 0.0)).g;
+  float hR = simA(vUv + vec2(s, 0.0)).r + simA(vUv + vec2(s, 0.0)).g;
+  float hU = simA(vUv - vec2(0.0, s)).r + simA(vUv - vec2(0.0, s)).g;
+  float hD = simA(vUv + vec2(0.0, s)).r + simA(vUv + vec2(0.0, s)).g;
+  vec2 grad = vec2(hR - hL, hD - hU) / (2.0 * uCell);
+  vec2 wp = vWP.xz * 5.0 - flow * t * 0.6;
+  vec2 rip = vec2(vnoise(wp + t * 0.3) - 0.5, vnoise(wp.yx * 1.3 - t * 0.25) - 0.5);
+  vec3 n = normalize(vec3(-grad.x * 1.5 - rip.x * 0.18, 1.0, -grad.y * 1.5 - rip.y * 0.18));
+
+  vec3 V = normalize(cameraPosition - vWP);
+  vec3 L = normalize(uSunDir);
+  vec3 R = reflect(-V, n);
+  float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
+
+  // Beer-Lambert absorption over depth
+  float trans = exp(-26.0 * d);
+  vec3 shallowC = lin(vec3(0.20, 0.55, 0.52));
+  vec3 deepC = lin(vec3(0.03, 0.17, 0.26));
+  vec3 body = mix(deepC, shallowC, trans) * (0.45 + 0.55 * max(dot(n, L), 0.0)) * (0.5 + 0.5 * uSunColor);
+
+  vec3 sky = mix(uSkyHor, uSkyTop, clamp(R.y, 0.0, 1.0));
+  vec3 col = mix(body, sky, clamp(fres, 0.0, 1.0));
+  col += uSunColor * pow(max(dot(R, L), 0.0), 220.0) * 2.5;
+
+  // whitewater streaks along fast flow, and shoreline foam / ripples
+  vec2 fdir = spd > 0.01 ? flow / spd : vec2(1.0, 0.0);
+  vec2 fp = vec2(dot(vWP.xz, fdir), dot(vWP.xz, vec2(-fdir.y, fdir.x)));
+  float streak = vnoise(vec2(fp.x * 3.0 - t * spd * 0.8, fp.y * 14.0));
+  float foam = smoothstep(0.7, 2.2, spd) * smoothstep(0.35, 0.8, streak);
+  float shore = 1.0 - smoothstep(0.008, 0.03, d);
+  float ring = 0.5 + 0.5 * sin(d * 420.0 - t * 2.5);
+  foam = clamp(foam + shore * (0.35 + 0.35 * ring), 0.0, 1.0);
+  col = mix(col, vec3(0.92, 0.96, 0.98), foam * 0.8);
+
+  float fd = length(vWP - cameraPosition);
+  col = mix(col, uFogColor, 1.0 - exp(-uFogDensity * uFogDensity * fd * fd));
+  float alpha = mix(0.35, 0.95, 1.0 - trans) * smoothstep(0.008, 0.022, d);
+  gl_FragColor = vec4(col, max(alpha, foam * 0.85));
+}
+`;
+
+export const GLSL_COMPOSITE_VERT = /* glsl */`
+varying vec2 vUv;
+void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+`;
+
+// ACES filmic (Narkowicz fit) + exact sRGB encode: the only tone-map / gamma step in the pipeline.
+export const GLSL_COMPOSITE_FRAG = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D tColor;
+uniform sampler2D tDepth;
+uniform float uExposure;
+vec3 acesFilm(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+vec3 srgbEncode(vec3 c) {
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, step(vec3(0.0031308), c));
+}
+void main() {
+  vec3 c = texture2D(tColor, vUv).rgb * uExposure;
+  gl_FragColor = vec4(srgbEncode(acesFilm(c)), 1.0);
+}
+`;

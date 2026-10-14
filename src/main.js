@@ -1,9 +1,19 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { detectCaps } from './gl/caps.js';
-import { createSceneTarget } from './gl/post.js';
+import { createSceneTarget, createComposite } from './gl/post.js';
+import { SHARED } from './gl/shared.js';
+import { createSimTextures, packSimTextures } from './gl/simtex.js';
+import { createGridGeometry, createIslandTop, createWaterSurface, createBasaltSkirt } from './gl/terrain.js';
+import { createWorld } from './sim/world.js';
+import { hydroStep } from './sim/hydro.js';
+import { prewarm } from './sim/prewarm.js';
+import { TUNING } from './sim/tuning.js';
 
 const canvas = document.getElementById('stage');
 const fallback = document.getElementById('fallback');
+const query = new URLSearchParams(location.search);
+const DEBUG = query.has('debug');
 
 function fail(msg) {
   fallback.textContent = msg;
@@ -30,19 +40,50 @@ function boot() {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.NoToneMapping;
 
+  // --- simulation ---
+  const world = createWorld(query.has('seed') ? parseInt(query.get('seed'), 10) : TUNING.seedDefault);
+  prewarm(world);
+  const simTex = createSimTextures(caps.floatLinear);
+  SHARED.uSimTexA.value = simTex.texA;
+  SHARED.uSimTexB.value = simTex.texB;
+  packSimTextures(world, simTex);
+
+  // --- scene ---
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1a1530);
-  const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 200);
-  camera.position.set(0, 14, 26);
-  camera.lookAt(0, 0, 0);
+  scene.background = new THREE.Color(0x6a5a78);
+  scene.fog = new THREE.FogExp2(0xcc8c73, SHARED.uFogDensity.value);
 
-  // M0 placeholder: a rotating marker proving the loop, timer and target pipeline work.
-  const marker = new THREE.Mesh(
-    new THREE.OctahedronGeometry(2),
-    new THREE.MeshNormalMaterial()
-  );
-  scene.add(marker);
+  const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 140);
+  camera.position.set(0, 15, 25);
 
+  const hemi = new THREE.HemisphereLight(0x8f86c8, 0x5a4236, 1.1);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffb878, 3.2);
+  sun.position.copy(SHARED.uSunDir.value).multiplyScalar(30);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  const sc = sun.shadow.camera;
+  sc.left = -13; sc.right = 13; sc.top = 13; sc.bottom = -13; sc.near = 1; sc.far = 80;
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.03;
+  scene.add(sun);
+
+  const grid = createGridGeometry();
+  scene.add(createIslandTop(grid, caps));
+  scene.add(createBasaltSkirt());
+  scene.add(createWaterSurface(grid, caps));
+
+  const controls = new OrbitControls(camera, canvas);
+  controls.target.set(0, 0, 0);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 9;
+  controls.maxDistance = 44;
+  controls.maxPolarAngle = 1.38;
+  controls.update();
+
+  // --- post ---
+  const post = createComposite();
   let sceneTarget = null;
   const pr = Math.min(window.devicePixelRatio || 1, 1.5);
 
@@ -53,9 +94,10 @@ function boot() {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    const tw = Math.floor(w * pr), th = Math.floor(h * pr);
     if (sceneTarget) sceneTarget.dispose();
-    sceneTarget = createSceneTarget(tw, th, caps);
+    sceneTarget = createSceneTarget(Math.floor(w * pr), Math.floor(h * pr), caps);
+    post.material.uniforms.tColor.value = sceneTarget.texture;
+    post.material.uniforms.tDepth.value = sceneTarget.depthTexture;
   }
   window.addEventListener('resize', resize);
   resize();
@@ -64,17 +106,36 @@ function boot() {
   const timer = new THREE.Timer();
   timer.connect(document);
 
+  let simAcc = 0;
+  let frame = 0;
+  const SIM_SPEED = 2.0;      // sim seconds per real second
+  const MAX_SUBSTEPS = 3;
+
+  function renderFrame() {
+    renderer.setRenderTarget(sceneTarget);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    renderer.render(post.scene, post.camera);
+  }
+
   renderer.setAnimationLoop((time) => {
     timer.update(time);
     const dt = Math.min(timer.getDelta(), 0.05);
-    marker.rotation.y += dt * 0.8;
-    marker.rotation.x += dt * 0.3;
-    renderer.render(scene, camera);
+    SHARED.uTime.value += dt;
+
+    simAcc += dt * SIM_SPEED;
+    let n = 0;
+    while (simAcc >= world.params.dt && n < MAX_SUBSTEPS) { hydroStep(world); simAcc -= world.params.dt; n++; }
+    if (n === 0 && simAcc > world.params.dt) simAcc = 0;
+    if (n > 0) packSimTextures(world, simTex);
+
+    controls.update();
+    renderFrame();
+    frame++;
+    if (DEBUG && frame === 3) console.info('[mythos] programs compiled:', renderer.info.programs.length);
   });
 
-  if (new URLSearchParams(location.search).has('debug')) {
-    console.info('[mythos] caps', caps);
-  }
+  if (DEBUG) console.info('[mythos] caps', JSON.stringify(caps));
 }
 
 boot();

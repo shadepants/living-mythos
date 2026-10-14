@@ -1,6 +1,6 @@
+import { GRID_W, GRID_H, GRID_N } from './grid.js';
 import { TUNING } from './tuning.js';
 
-const GW = 128, GH = 128, GN = GW * GH;
 
 // One virtual-pipe substep (spec 3.2). Allocation-free: only typed-array reads/writes and locals.
 export function hydroStep(world) {
@@ -12,7 +12,7 @@ export function hydroStep(world) {
   // sources
   if (p.rain > 0) {
     const add = p.rain * dt;
-    for (let i = 0; i < GN; i++) if (mask[i] === 0) water[i] += add;
+    for (let i = 0; i < GRID_N; i++) if (mask[i] === 0) water[i] += add;
   }
   if (p.springRate > 0) {
     const add = p.springRate * dt;
@@ -20,15 +20,15 @@ export function hydroStep(world) {
   }
 
   // 1+2: flux acceleration and conservation scaling
-  for (let z = 0; z < GH; z++) {
-    for (let x = 0; x < GW; x++) {
-      const i = z * GW + x;
+  for (let z = 0; z < GRID_H; z++) {
+    for (let x = 0; x < GRID_W; x++) {
+      const i = z * GRID_W + x;
       const h0 = elev[i] + water[i];
       let fl = 0, fr = 0, ft = 0, fb = 0;
       if (x > 0) { fl = fluxL[i] * damp + dt * g * (h0 - elev[i - 1] - water[i - 1]); if (fl < 0) fl = 0; }
-      if (x < GW - 1) { fr = fluxR[i] * damp + dt * g * (h0 - elev[i + 1] - water[i + 1]); if (fr < 0) fr = 0; }
-      if (z > 0) { ft = fluxT[i] * damp + dt * g * (h0 - elev[i - GW] - water[i - GW]); if (ft < 0) ft = 0; }
-      if (z < GH - 1) { fb = fluxB[i] * damp + dt * g * (h0 - elev[i + GW] - water[i + GW]); if (fb < 0) fb = 0; }
+      if (x < GRID_W - 1) { fr = fluxR[i] * damp + dt * g * (h0 - elev[i + 1] - water[i + 1]); if (fr < 0) fr = 0; }
+      if (z > 0) { ft = fluxT[i] * damp + dt * g * (h0 - elev[i - GRID_W] - water[i - GRID_W]); if (ft < 0) ft = 0; }
+      if (z < GRID_H - 1) { fb = fluxB[i] * damp + dt * g * (h0 - elev[i + GRID_W] - water[i + GRID_W]); if (fb < 0) fb = 0; }
       let k = water[i] / (dt * (fl + fr + ft + fb) + 1e-6);
       if (k > 1) k = 1;
       fluxL[i] = fl * k; fluxR[i] = fr * k; fluxT[i] = ft * k; fluxB[i] = fb * k;
@@ -40,13 +40,13 @@ export function hydroStep(world) {
   const drainFrac = Math.min(1, p.rimDrainRate * dt);
   const evap = p.evap * dt;
   const velMax = TUNING.velMax;
-  for (let z = 0; z < GH; z++) {
-    for (let x = 0; x < GW; x++) {
-      const i = z * GW + x;
+  for (let z = 0; z < GRID_H; z++) {
+    for (let x = 0; x < GRID_W; x++) {
+      const i = z * GRID_W + x;
       const inL = x > 0 ? fluxR[i - 1] : 0;
-      const inR = x < GW - 1 ? fluxL[i + 1] : 0;
-      const inT = z > 0 ? fluxB[i - GW] : 0;
-      const inB = z < GH - 1 ? fluxT[i + GW] : 0;
+      const inR = x < GRID_W - 1 ? fluxL[i + 1] : 0;
+      const inT = z > 0 ? fluxB[i - GRID_W] : 0;
+      const inB = z < GRID_H - 1 ? fluxT[i + GRID_W] : 0;
       const out = fluxL[i] + fluxR[i] + fluxT[i] + fluxB[i];
       const d0 = water[i];
       let d1 = d0 + dt * (inL + inR + inT + inB - out);
@@ -83,7 +83,7 @@ export function hydroStep(world) {
   if (p.erosion) {
     const kCap = p.kCap, kEr = p.kErode * dt, kDep = p.kDeposit * dt;
     const maxD = TUNING.maxDElev, floor = TUNING.elevFloor, gain = TUNING.alluvialGain;
-    for (let i = 0; i < GN; i++) {
+    for (let i = 0; i < GRID_N; i++) {
       if (mask[i] === 1) { sediment[i] = 0; continue; }
       const dep = water[i];
       let cap = 0;
@@ -108,15 +108,15 @@ export function hydroStep(world) {
         fertility[i] = f > 1 ? 1 : f;
       }
     }
-    for (let z = 0; z < GH; z++) {
-      for (let x = 0; x < GW; x++) {
-        const i = z * GW + x;
+    for (let z = 0; z < GRID_H; z++) {
+      for (let x = 0; x < GRID_W; x++) {
+        const i = z * GRID_W + x;
         let px = x - vx[i] * dt, pz = z - vz[i] * dt;
-        if (px < 0) px = 0; else if (px > GW - 1.001) px = GW - 1.001;
-        if (pz < 0) pz = 0; else if (pz > GH - 1.001) pz = GH - 1.001;
+        if (px < 0) px = 0; else if (px > GRID_W - 1.001) px = GRID_W - 1.001;
+        if (pz < 0) pz = 0; else if (pz > GRID_H - 1.001) pz = GRID_H - 1.001;
         const x0 = px | 0, z0 = pz | 0, fx = px - x0, fz = pz - z0;
-        const j = z0 * GW + x0;
-        const a = sediment[j], b = sediment[j + 1], c = sediment[j + GW], d2 = sediment[j + GW + 1];
+        const j = z0 * GRID_W + x0;
+        const a = sediment[j], b = sediment[j + 1], c = sediment[j + GRID_W], d2 = sediment[j + GRID_W + 1];
         sedTmp[i] = (a + (b - a) * fx) + ((c + (d2 - c) * fx) - (a + (b - a) * fx)) * fz;
       }
     }

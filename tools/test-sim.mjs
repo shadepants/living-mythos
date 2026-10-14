@@ -1,5 +1,6 @@
 // Sim tests (spec 3.2). Run: node --expose-gc tools/test-sim.mjs   (npm test)
-import { createWorld, GRID_N, GRID_W, GRID_H } from '../src/sim/world.js';
+import { createWorld } from '../src/sim/world.js';
+import { GRID_N, GRID_W, GRID_H } from '../src/sim/grid.js';
 import { hydroStep } from '../src/sim/hydro.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { Rng } from '../src/sim/rng.js';

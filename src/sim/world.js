@@ -1,9 +1,7 @@
 import { TUNING } from './tuning.js';
 import { generateIsland } from './island.js';
+import { GRID_N } from './grid.js';
 
-export const GRID_W = 128;
-export const GRID_H = 128;
-export const GRID_N = GRID_W * GRID_H;
 
 // All simulation state, allocated once (spec 3.1).
 export function createWorld(seed) {

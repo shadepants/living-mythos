@@ -22,7 +22,10 @@ function visit(file, stack = []) {
   let code = readFileSync(file, 'utf8');
   const deps = [];
   code = code.replace(importRe, (m, clause, spec) => {
-    if (spec.startsWith('.')) { deps.push(resolve(dirname(file), spec)); return ''; }
+    if (spec.startsWith('.')) {
+      if (/\bas\b|\*/.test(clause)) throw new Error(relative(src, file) + ': aliased/namespace local imports are not supported: ' + m.trim());
+      deps.push(resolve(dirname(file), spec)); return '';
+    }
     external.add(m.trim().replace(/;?$/, ';'));
     return '';
   });
