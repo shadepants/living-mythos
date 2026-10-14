@@ -4,6 +4,8 @@ import { detectCaps } from './gl/caps.js';
 import { createSceneTarget, createComposite } from './gl/post.js';
 import { SHARED } from './gl/shared.js';
 import { createSimTextures, packSimTextures } from './gl/simtex.js';
+import { createSkyDome } from './gl/sky.js';
+import { createAtmosphere } from './gl/atmo.js';
 import { createGridGeometry, createIslandTop, createWaterSurface, createBasaltSkirt } from './gl/terrain.js';
 import { createWorld } from './sim/world.js';
 import { hydroStep } from './sim/hydro.js';
@@ -52,6 +54,7 @@ function boot() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x6a5a78);
   scene.fog = new THREE.FogExp2(0xcc8c73, SHARED.uFogDensity.value);
+  const atmoQuery = query.get('atmo');
 
   const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 140);
   camera.position.set(0, 15, 25);
@@ -69,6 +72,7 @@ function boot() {
   scene.add(sun);
 
   const grid = createGridGeometry();
+  scene.add(createSkyDome());
   scene.add(createIslandTop(grid, caps));
   scene.add(createBasaltSkirt());
   scene.add(createWaterSurface(grid, caps));
@@ -83,7 +87,9 @@ function boot() {
   controls.update();
 
   // --- post ---
-  const post = createComposite();
+  const post = createComposite(caps, 12);
+  const atmo = createAtmosphere(scene, sun, hemi, post);
+  if (atmoQuery !== null) { atmo.setTarget(parseFloat(atmoQuery)); atmo.state = atmo.target; }
   let sceneTarget = null;
   const pr = Math.min(window.devicePixelRatio || 1, 1.5);
 
@@ -98,9 +104,17 @@ function boot() {
     sceneTarget = createSceneTarget(Math.floor(w * pr), Math.floor(h * pr), caps);
     post.material.uniforms.tColor.value = sceneTarget.texture;
     post.material.uniforms.tDepth.value = sceneTarget.depthTexture;
+    post.material.uniforms.uTexel.value.set(1 / sceneTarget.width, 1 / sceneTarget.height);
+    post.material.uniforms.uMaxBlur.value = 6.0 * (sceneTarget.height / 900);
   }
   window.addEventListener('resize', resize);
   resize();
+
+  const ATMO_KEYS = { KeyQ: 0, KeyW: 0.5, KeyE: 1 };
+  window.addEventListener('keydown', (ev) => {
+    if (ev.code in ATMO_KEYS) atmo.setTarget(ATMO_KEYS[ev.code]);
+    else if (ev.code === 'KeyD') { atmo.pinned = false; atmo.drift = true; }
+  });
 
   // Timer is core in three r186 (no addon copy ships in r186; see NOTES.md).
   const timer = new THREE.Timer();
@@ -130,6 +144,8 @@ function boot() {
     if (n > 0) packSimTextures(world, simTex);
 
     controls.update();
+    atmo.update(dt);
+    post.material.uniforms.uFocusDist.value = camera.position.distanceTo(controls.target);
     renderFrame();
     frame++;
     if (DEBUG && frame === 3) console.info('[mythos] programs compiled:', renderer.info.programs.length);

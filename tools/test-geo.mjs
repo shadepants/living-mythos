@@ -1,5 +1,8 @@
 // Geometry sanity tests that need three but no GPU (run: node tools/test-geo.mjs).
+import * as THREE from 'three';
 import { createGridGeometry, createBasaltSkirt } from '../src/gl/terrain.js';
+import { createAtmosphere } from '../src/gl/atmo.js';
+import { SHARED } from '../src/gl/shared.js';
 
 let failed = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
@@ -39,6 +42,30 @@ const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${na
   check('skirt normals face outward', inn === 0 && out > 800, `out ${out}, in ${inn}`);
   check('skirt tip at y = -9.5', Math.abs(minY + 9.5) < 1e-4, `minY ${minY}`);
   check('skirt top ring meets island rim (r = 9.2, y = -0.6)', Math.abs(topMaxR - 9.2) < 1e-4 && Math.abs(topMinR - 9.2) < 1e-4, `r ${topMinR}..${topMaxR}`);
+}
+
+{
+  const scene = { fog: { color: new THREE.Color(), density: 0 }, background: new THREE.Color() };
+  const sun = new THREE.DirectionalLight(), hemi = new THREE.HemisphereLight();
+  const comp = { material: { uniforms: { uExposure: { value: 1 } } } };
+  const at = createAtmosphere(scene, sun, hemi, comp);
+  const at_ = (v) => { at.setTarget(v); at.state = v; at.update(0.016); return { i: sun.intensity, a: SHARED.uAurora.value, r: SHARED.uRain.value, n: SHARED.uNight.value, w: SHARED.uWet.value, e: comp.material.uniforms.uExposure.value }; };
+  const g = at_(0), a = at_(0.5), m = at_(1), q = at_(0.25);
+  check('atmosphere: golden hour is bright with no aurora/rain', g.i > 3 && g.a === 0 && g.r === 0, JSON.stringify(g));
+  check('atmosphere: aurora state is night with aurora', a.a === 1 && a.n === 1 && a.i < 1.2, JSON.stringify(a));
+  check('atmosphere: monsoon has rain and wet sheen', m.r === 1 && m.w === 1, JSON.stringify(m));
+  check('atmosphere: 0.25 blends smoothly between golden and aurora', q.i < g.i && q.i > a.i && q.a > 0 && q.a < 1, JSON.stringify(q));
+  // easing: from golden toward monsoon should move monotonically
+  at.setTarget(0); at.state = 0; at.setTarget(1);
+  let prev = 0, mono = true;
+  for (let i = 0; i < 300; i++) { at.update(0.016); if (at.state < prev - 1e-9) mono = false; prev = at.state; }
+  check('atmosphere: state eases monotonically to target', mono && prev > 0.95, `state ${prev.toFixed(3)}`);
+  check('atmosphere: drift cycles all three states when unpinned', (() => {
+    const at2 = createAtmosphere(scene, sun, hemi, comp);
+    let sawAurora = false, sawMonsoon = false, sawGolden = false;
+    for (let t = 0; t < 360 * 2 / 0.1; t++) { at2.update(0.1); if (at2.state > 0.47 && at2.state < 0.53) sawAurora = true; if (at2.state > 0.97) sawMonsoon = true; if (t > 100 && at2.state < 0.03) sawGolden = true; }
+    return sawAurora && sawMonsoon && sawGolden;
+  })());
 }
 
 if (failed) { console.error(`${failed} geometry test(s) failed`); process.exit(1); }

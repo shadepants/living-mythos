@@ -102,12 +102,12 @@ export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
 
   // wet shoreline / soaked soil
   float wetTerr = clamp(tA.g * 14.0 + tB.r * 0.6, 0.0, 1.0);
-  col *= 1.0 - 0.45 * wetTerr;
+  col *= (1.0 - 0.45 * wetTerr) * (1.0 - 0.16 * uWet);
   diffuseColor.rgb = col;
 `;
 
 export const GLSL_ISLAND_FRAG_ROUGH = /* glsl */`
-  float roughnessFactor = mix(roughness, 0.32, wetTerr);
+  float roughnessFactor = mix(roughness, 0.26, clamp(wetTerr + uWet * 0.7, 0.0, 1.0));
 `;
 
 export const GLSL_WATER_VERT = /* glsl */`
@@ -137,6 +137,7 @@ uniform vec3 uSkyTop;
 uniform vec3 uSkyHor;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform float uRain;
 ${GLSL_SIM}
 void main() {
   vec4 a = simA(vUv);
@@ -155,7 +156,7 @@ void main() {
   vec2 grad = vec2(hR - hL, hD - hU) / (2.0 * uCell);
   vec2 wp = vWP.xz * 5.0 - flow * t * 0.6;
   vec2 rip = vec2(vnoise(wp + t * 0.3) - 0.5, vnoise(wp.yx * 1.3 - t * 0.25) - 0.5);
-  vec3 n = normalize(vec3(-grad.x * 1.5 - rip.x * 0.18, 1.0, -grad.y * 1.5 - rip.y * 0.18));
+  vec3 n = normalize(vec3(-grad.x * 1.5 - rip.x * (0.18 + 0.4 * uRain), 1.0, -grad.y * 1.5 - rip.y * (0.18 + 0.4 * uRain)));
 
   vec3 V = normalize(cameraPosition - vWP);
   vec3 L = normalize(uSunDir);
@@ -201,14 +202,65 @@ varying vec2 vUv;
 uniform sampler2D tColor;
 uniform sampler2D tDepth;
 uniform float uExposure;
+uniform float uNear;
+uniform float uFar;
+uniform float uFocusDist;
+uniform float uFocusY;
+uniform float uBand;
+uniform float uMaxBlur;
+uniform vec2 uTexel;
+uniform float uCA;
 vec3 acesFilm(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 vec3 srgbEncode(vec3 c) {
   vec3 lo = c * 12.92;
   vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
   return mix(lo, hi, step(vec3(0.0031308), c));
 }
+float viewDist(float d) {
+  float z = d * 2.0 - 1.0;
+  return 2.0 * uNear * uFar / (uFar + uNear - z * (uFar - uNear));
+}
+// Circle of confusion: screen-space tilt-shift band combined with real view depth, so geometry sitting at the
+// focal depth (peaks, spires, lanterns) stays razor sharp even inside the blurred bands.
+float cocAt(vec2 uv) {
+  float tilt = smoothstep(uBand, uBand + 0.30, abs(uv.y - uFocusY));
+#ifdef NO_DEPTH
+  return clamp(tilt, 0.0, 1.0);
+#else
+  float dist = viewDist(texture2D(tDepth, uv).x);
+  float rel = abs(dist - uFocusDist) / uFocusDist;
+  float inSlab = 1.0 - smoothstep(0.05, 0.24, rel);
+  float depthBlur = smoothstep(0.30, 1.25, rel) * 0.7;
+  return clamp(tilt * (1.0 - 0.93 * inSlab) + depthBlur, 0.0, 1.0);
+#endif
+}
 void main() {
-  vec3 c = texture2D(tColor, vUv).rgb * uExposure;
+  float coc0 = cocAt(vUv);
+  vec3 acc = texture2D(tColor, vUv).rgb;
+  float wsum = 1.0;
+  if (coc0 > 0.01) {
+    vec2 px = uTexel * uMaxBlur * coc0;
+    for (int i = 0; i < TAPS; i++) {
+      float fi = float(i);
+      float r = sqrt((fi + 0.5) / float(TAPS));
+      float a = fi * 2.39996323;
+      vec2 suv = vUv + vec2(cos(a), sin(a)) * r * px;
+      float cs = cocAt(suv);
+      float w = cs < coc0 * r ? cs / (coc0 * r + 1e-4) : 1.0;
+      acc += texture2D(tColor, suv).rgb * w;
+      wsum += w;
+    }
+  }
+  vec3 c = acc / wsum;
+
+  vec2 rc = vUv - 0.5;
+  float r2 = dot(rc, rc);
+  vec2 off = rc * r2 * uCA;
+  c.r = mix(c.r, texture2D(tColor, vUv + off).r, 0.7);
+  c.b = mix(c.b, texture2D(tColor, vUv - off).b, 0.7);
+
+  float vig = smoothstep(0.92, 0.28, length(rc * vec2(1.0, 0.92) * 1.45));
+  c *= mix(0.62, 1.0, vig) * uExposure;
   gl_FragColor = vec4(srgbEncode(acesFilm(c)), 1.0);
 }
 `;

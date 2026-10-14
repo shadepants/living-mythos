@@ -13,4 +13,9 @@ export const SHARED = {
   uFogColor: { value: new THREE.Color(0.80, 0.55, 0.45) },
   uFogDensity: { value: 0.012 },
   uAtmo: { value: 0 },
+  uWet: { value: 0 },
+  uWind: { value: 0.35 },
+  uRain: { value: 0 },
+  uNight: { value: 0 },
+  uAurora: { value: 0 },
 };

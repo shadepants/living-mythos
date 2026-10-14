@@ -43,6 +43,7 @@ function addSimUniforms(shader) {
   shader.uniforms.uSimTexB = SHARED.uSimTexB;
   shader.uniforms.uTime = SHARED.uTime;
   shader.uniforms.uCell = SHARED.uCell;
+  shader.uniforms.uWet = SHARED.uWet;
 }
 
 export function createIslandTop(grid, caps) {
@@ -55,7 +56,7 @@ export function createIslandTop(grid, caps) {
       .replace('#include <beginnormal_vertex>', GLSL_ISLAND_VERT_NORMAL)
       .replace('#include <begin_vertex>', GLSL_ISLAND_VERT_POS);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec2 vSimUv;\n${GLSL_SIM}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec2 vSimUv;\nuniform float uWet;\n${GLSL_SIM}`)
       .replace('#include <color_fragment>', GLSL_ISLAND_FRAG_COLOR)
       .replace('#include <roughnessmap_fragment>', GLSL_ISLAND_FRAG_ROUGH);
   };
@@ -82,7 +83,7 @@ export function createWaterSurface(grid, caps) {
     uniforms: {
       uSimTexA: SHARED.uSimTexA, uSimTexB: SHARED.uSimTexB, uTime: SHARED.uTime, uCell: SHARED.uCell,
       uSunDir: SHARED.uSunDir, uSunColor: SHARED.uSunColor, uSkyTop: SHARED.uSkyTop, uSkyHor: SHARED.uSkyHor,
-      uFogColor: SHARED.uFogColor, uFogDensity: SHARED.uFogDensity,
+      uFogColor: SHARED.uFogColor, uFogDensity: SHARED.uFogDensity, uRain: SHARED.uRain,
     },
     transparent: true, depthWrite: false,
     defines: caps.floatLinear ? {} : { MANUAL_BILINEAR: '' },
