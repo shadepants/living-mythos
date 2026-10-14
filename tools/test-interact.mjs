@@ -122,6 +122,15 @@ await page.mouse.move(40, 40); await page.mouse.down(); await page.mouse.move(20
 const cam1 = await ev(() => window.__mythos.camera.position.toArray());
 check('dragging empty space orbits the camera', cam0.some((v, i) => Math.abs(v - cam1[i]) > 0.05), `${cam0.map(v => v.toFixed(1))} -> ${cam1.map(v => v.toFixed(1))}`);
 
+// weather feeds the sim: Monsoon multiplies rain and changes crop growth; the structure pool follows the sim
+const wx0 = await ev(() => ({ rain: window.__mythos.world.params.rain, grow: window.__mythos.world.params.ecoGrow, evap: window.__mythos.world.params.evapMul }));
+await ev(() => window.__mythos.atmo.setTarget(1)); await sleep(5500);
+const wx1 = await ev(() => ({ rain: window.__mythos.world.params.rain, grow: window.__mythos.world.params.ecoGrow, evap: window.__mythos.world.params.evapMul, rainU: window.__mythos.atmo.cur.rain }));
+check('Monsoon raises rainfall in the simulation (loop: weather -> water)', wx1.rainU > 0.8 && wx1.rain > wx0.rain * 5, `rain ${wx0.rain.toExponential(1)} -> ${wx1.rain.toExponential(1)}`);
+check('Monsoon cuts evaporation and changes crop growth', wx1.evap < wx0.evap - 0.3 && wx1.grow !== wx0.grow, `evapMul ${wx0.evap.toFixed(2)} -> ${wx1.evap.toFixed(2)}, ecoGrow ${wx0.grow.toFixed(2)} -> ${wx1.grow.toFixed(2)}`);
+const pool = await ev(() => ({ sim: window.__mythos.world.civ.nS, gpu: window.__mythos.structures.count }));
+check('the structure pool mirrors the live simulation', pool.gpu === pool.sim && pool.sim >= 8, `${pool.gpu}/${pool.sim}`);
+
 // atmosphere buttons
 await page.click('#dock button:nth-child(8)');
 await sleep(100);
