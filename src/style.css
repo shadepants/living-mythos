@@ -45,3 +45,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0a14; tou
 @media (pointer: coarse) { #dock button { min-width: 56px; min-height: 56px; } }
 @media (max-width: 520px) { #dock button { min-width: 44px; padding: 6px 5px; font-size: 9.5px; } #dock { gap: 2px; padding: 5px 6px; } }
 @media (prefers-reduced-motion: reduce) { #dock button, #hint { transition: none; } }
+
+#mute {
+  all: unset; box-sizing: border-box; cursor: pointer; position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
+  width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; pointer-events: auto;
+  color: rgba(255,248,236,0.85); background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.05));
+  backdrop-filter: blur(16px) saturate(1.35); -webkit-backdrop-filter: blur(16px) saturate(1.35); border: 1px solid rgba(255,255,255,0.20);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 24px rgba(8,6,20,0.35); -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+#mute svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#mute:focus-visible { outline: 2px solid rgba(255,225,170,0.9); outline-offset: 2px; }
+#mute[aria-pressed="true"] { color: rgba(255,200,170,0.95); }

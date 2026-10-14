@@ -73,3 +73,21 @@ export function createDock(root, handlers) {
     },
   };
 }
+
+// Small glass sound toggle in the top-right corner.
+export function createMuteButton(root, onToggle) {
+  const b = document.createElement('button');
+  b.id = 'mute';
+  b.type = 'button';
+  b.setAttribute('aria-label', 'Sound');
+  b.setAttribute('aria-pressed', 'false');
+  const on = '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12"/></svg>';
+  const off = '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>';
+  b.innerHTML = on;
+  b.addEventListener('click', () => { const muted = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', muted ? 'true' : 'false'); b.innerHTML = muted ? off : on; onToggle(muted); });
+  for (const ev of ['pointerdown', 'pointerup', 'pointermove']) b.addEventListener(ev, (e) => e.stopPropagation(), { passive: true });
+  root.appendChild(b);
+  return {
+    set(muted) { b.setAttribute('aria-pressed', muted ? 'true' : 'false'); b.innerHTML = muted ? off : on; },
+  };
+}

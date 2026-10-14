@@ -7,7 +7,9 @@ import { createSimTextures, packSimTextures } from './gl/simtex.js';
 import { createCursor } from './gl/cursor.js';
 import { createRaincloud } from './gl/cloud.js';
 import { createRingFx } from './gl/fxbridge.js';
-import { createDock, TOOL_HINTS } from './ui/dock.js';
+import { createDock, createMuteButton, TOOL_HINTS } from './ui/dock.js';
+import { createAudioEngine } from './audio/engine.js';
+import { createDirector, directorStep } from './audio/director.js';
 import { createController } from './input/controller.js';
 import { createStructures } from './gl/structures.js';
 import { createVillagers } from './gl/villagers.js';
@@ -21,6 +23,7 @@ import { simStep } from './sim/sim.js';
 import { prewarm } from './sim/prewarm.js';
 import { seedCivilization } from './sim/civ.js';
 import { createParticles, stepParticles, breezeLanterns } from './sim/particles.js';
+import { sampleGrid, visualHeight } from './sim/sample.js';
 import { TUNING } from './sim/tuning.js';
 
 const canvas = document.getElementById('stage');
@@ -124,6 +127,23 @@ function boot() {
     canvas, camera, controls, world, cloud: cloudFx,
     onChange: (i) => { dock.setTool(i); dock.showHint(TOOL_HINTS[i]); },
   });
+  // --- audio: created lazily on the first gesture (autoplay policy) ---
+  const audio = createAudioEngine(() => new (window.AudioContext || window.webkitAudioContext)());
+  const director = createDirector(world);
+  const muteUi = createMuteButton(document.getElementById('ui'), (m) => audio.setMuted(m));
+  const gesture = () => { if (!audio.ensure() && audio.ctx === null && !audio.failed) { audio.failed = true; } };
+  window.addEventListener('pointerdown', gesture, { capture: true });
+  window.addEventListener('keydown', gesture, { capture: true });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) audio.suspend(); else audio.resume(); });
+  const aState = { atmo: 0, bias: 0, wind: 0, windSpeed: 0, flux: 0, sculpt: 0, night: 0, aurora: 0 };
+  const aPv = new THREE.Vector3(), aCam = new THREE.Vector3(), aTgt = new THREE.Vector3();
+  const spatial = (x, z, out) => {
+    aPv.set(x, visualHeight(world.elev, x, z), z).project(camera);
+    out.pan = Math.max(-1, Math.min(1, aPv.x * 0.8));
+    aTgt.copy(controls.target);
+    const d = Math.hypot(x - aTgt.x, z - aTgt.z);
+    out.gain = (1 / (1 + d / 14)) * (Math.abs(aPv.x) > 1.2 || Math.abs(aPv.y) > 1.2 ? 0.4 : 1);
+  };
   function syncAtmoUi() { dock.setAtmo(atmo.pinned ? (atmo.target < 0.25 ? 0 : atmo.target < 0.75 ? 1 : 2) : -1, !atmo.pinned && atmo.drift); }
 
   // --- post ---
@@ -153,6 +173,7 @@ function boot() {
   const ATMO_KEYS = { KeyQ: 0, KeyW: 0.5, KeyE: 1 };
   window.addEventListener('keydown', (ev) => {
     if (ev.code in ATMO_KEYS) { atmo.setTarget(ATMO_KEYS[ev.code]); syncAtmoUi(); }
+    else if (ev.code === 'KeyM') { audio.setMuted(!audio.muted); muteUi.set(audio.muted); }
     else if (ev.code === 'KeyD') { atmo.pinned = false; atmo.drift = true; syncAtmoUi(); }
     else if (ev.code >= 'Digit1' && ev.code <= 'Digit4') ctl.setTool(parseInt(ev.code.slice(5), 10) - 1);
   });
@@ -165,6 +186,8 @@ function boot() {
   timer.connect(document);
 
   let simAcc = 0;
+  let camSpeed = 0;
+  const camPrev = new THREE.Vector3().copy(camera.position);
   let frame = 0;
   const SIM_SPEED = 2.0;      // sim seconds per real second
   const MAX_SUBSTEPS = 3;
@@ -188,6 +211,8 @@ function boot() {
     if (n > 0) packSimTextures(world, simTex);
 
     controls.update();
+    camSpeed += (camera.position.distanceTo(camPrev) / Math.max(dt, 1e-3) - camSpeed) * Math.min(1, dt * 6);
+    camPrev.copy(camera.position);
     ctl.update(dt, SHARED.uTime.value);
     ringFx.update();
     {
@@ -197,6 +222,20 @@ function boot() {
       particlePool.userData.update(particles);
       structures.userData.update(world, dt);
       villagers.userData.update(world);
+    }
+    if (audio.ready) {
+      try {
+        const sp = Math.hypot(ctl.st.svel[0], ctl.st.svel[2]);
+        aCam.copy(camera.position);
+        aState.atmo = SHARED.uAtmo.value; aState.night = SHARED.uNight.value; aState.aurora = SHARED.uAurora.value;
+        aState.wind = Math.min(1, SHARED.uWind.value / 1.5);
+        aState.windSpeed = Math.min(1, sp * 0.12 + ctl.st.breezeAmt * 0.4 + camSpeed * 0.02);
+        aState.flux = Math.min(1, world.stats.flux / 120);
+        aState.sculpt = Math.max(director.rumble, ctl.st.active && ctl.st.tool === 0 ? 0.55 : 0);
+        aState.bias = sampleGrid(world.culturalBias, controls.target.x, controls.target.z);
+        audio.update(dt, aState);
+        directorStep(director, world, audio, aState, spatial, SHARED.uTime.value);
+      } catch (err) { audio.ready = false; console.warn('[mythos] audio disabled:', err && err.message); }
     }
     atmo.update(dt);
     // the weather feeds back into the sim: monsoon rains harder and evaporates less; golden hour grows crops fastest
@@ -214,7 +253,7 @@ function boot() {
     // Test hook (debug builds only): lets tools/test-interact.mjs drive and inspect the live app.
     const pv = new THREE.Vector3();
     window.__mythos = {
-      world, ctl, atmo, camera, controls, flora, particles, structures, villagers,
+      world, ctl, atmo, camera, controls, flora, particles, structures, villagers, audio, director,
       project(x, y, z) {
         pv.set(x, y, z).project(camera);
         const r = canvas.getBoundingClientRect();

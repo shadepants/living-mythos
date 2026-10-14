@@ -77,6 +77,14 @@ check('Shift+click carves', (await elevAt(target.x, target.z)) < e2 - 0.05);
 const camAfter = await ev(() => window.__mythos.camera.position.toArray());
 check('sculpting does not orbit the camera', camBefore.every((v, i) => Math.abs(v - camAfter[i]) < 1e-3));
 
+// audio: the first gesture unlocks a real AudioContext and sculpting plays notes
+const au = await ev(() => { const a = window.__mythos.audio; return { ready: a.ready, order: a.order, state: a.ctx && a.ctx.state }; });
+check('audio engine builds on the first gesture (real WebAudio)', au.ready === true, JSON.stringify(au));
+check('sculpting triggered notes through the director', au.order > 0, `${au.order} notes`);
+await page.keyboard.press('KeyM');
+check('M mutes the engine', (await ev(() => window.__mythos.audio.muted)) === true && (await ev(() => document.getElementById('mute').getAttribute('aria-pressed'))) === 'true');
+await page.keyboard.press('KeyM');
+
 // raincloud
 await page.keyboard.press('Digit2');
 const w0 = await sumArr('water');
