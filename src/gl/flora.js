@@ -81,28 +81,35 @@ export function createFlora(caps, count) {
   mesh.receiveShadow = true;
   mesh.castShadow = false;
 
-  // Jittered-grid placement over the island interior (deterministic).
+  // Jittered-grid placement over the island interior (deterministic), then shuffled so that lowering
+  // mesh.count (quality tiers) thins the flora evenly instead of eating whole rows.
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
   const G = 80, step = 20 / G;
-  let k = 0;
-  for (let gz = 0; gz < G && k < n; gz++) {
-    for (let gx = 0; gx < G && k < n; gx++) {
+  const cand = [];
+  for (let gz = 0; gz < G; gz++) {
+    for (let gx = 0; gx < G; gx++) {
       const x = -10 + (gx + 0.15 + 0.7 * hash2(gx, gz, 41)) * step;
       const z = -10 + (gz + 0.15 + 0.7 * hash2(gx, gz, 43)) * step;
       if (Math.hypot(x, z) > 8.3) continue;
-      q.setFromAxisAngle(up, hash2(gx, gz, 47) * Math.PI * 2);
-      p.set(x, 0, z);
-      m.compose(p, q, sc);
-      mesh.setMatrixAt(k, m);
-      const o = k * 4;
-      state.array[o] = hash2(gx, gz, 53);           // archetype 0..1 (tree if > 0.78)
-      state.array[o + 1] = 0.75 + 0.5 * hash2(gx, gz, 59); // growth stage
-      state.array[o + 2] = 0;                        // decay
-      state.array[o + 3] = 0;                        // luminescence
-      k++;
+      cand.push([x, z, gx, gz]);
     }
   }
+  for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(hash2(i, 7, 61) * (i + 1)); const t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+  let k = 0;
+  for (; k < cand.length && k < n; k++) {
+    const [x, z, gx, gz] = cand[k];
+    q.setFromAxisAngle(up, hash2(gx, gz, 47) * Math.PI * 2);
+    p.set(x, 0, z);
+    m.compose(p, q, sc);
+    mesh.setMatrixAt(k, m);
+    const o = k * 4;
+    state.array[o] = hash2(gx, gz, 53);                  // archetype 0..1 (tree if > 0.78)
+    state.array[o + 1] = 0.75 + 0.5 * hash2(gx, gz, 59); // growth stage
+    state.array[o + 2] = 0;                              // decay
+    state.array[o + 3] = 0;                              // luminescence
+  }
   mesh.count = k;
+  mesh.userData.full = k;
   mesh.instanceMatrix.needsUpdate = true;
   state.needsUpdate = true;
   mesh.userData.state = state;

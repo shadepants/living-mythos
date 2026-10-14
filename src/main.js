@@ -7,7 +7,9 @@ import { createSimTextures, packSimTextures } from './gl/simtex.js';
 import { createCursor } from './gl/cursor.js';
 import { createRaincloud } from './gl/cloud.js';
 import { createRingFx } from './gl/fxbridge.js';
-import { createDock, createMuteButton, TOOL_HINTS } from './ui/dock.js';
+import { createDock, createMuteButton, createPhotoButton, TOOL_HINTS } from './ui/dock.js';
+import { createDebugOverlay } from './ui/debug.js';
+import { QUALITY, TIER_NAMES, pickInitialTier, createGovernor, governorSample } from './gl/quality.js';
 import { createAudioEngine } from './audio/engine.js';
 import { createDirector, directorStep } from './audio/director.js';
 import { createController } from './input/controller.js';
@@ -22,6 +24,7 @@ import { createWorld } from './sim/world.js';
 import { simStep } from './sim/sim.js';
 import { prewarm } from './sim/prewarm.js';
 import { seedCivilization } from './sim/civ.js';
+import { loadFromStorage, saveToStorage, SAVE_KEY } from './sim/persist.js';
 import { createParticles, stepParticles, breezeLanterns } from './sim/particles.js';
 import { sampleGrid, visualHeight } from './sim/sample.js';
 import { TUNING } from './sim/tuning.js';
@@ -43,9 +46,13 @@ function boot() {
     return;
   }
   // Simulation first: the pre-warm blocks for a moment, and the GL context should not sit idle behind it.
-  const world = createWorld(query.has('seed') ? parseInt(query.get('seed'), 10) : TUNING.seedDefault);
-  prewarm(world);
-  seedCivilization(world);
+  const seed = query.has('seed') ? parseInt(query.get('seed'), 10) : TUNING.seedDefault;
+  const world = createWorld(seed);
+  let storage = null;
+  try { storage = window.localStorage; if (query.has('fresh')) storage.removeItem(SAVE_KEY); } catch (e) { storage = null; }
+  // restore a saved island if there is a valid one for this seed; otherwise pre-warm and found a settlement
+  const restored = storage ? loadFromStorage(storage, world) : { ok: false };
+  if (!restored.ok) { prewarm(world); seedCivilization(world); }
   const particles = createParticles();
   particles.cursor.i = world.events.head;
 
@@ -149,9 +156,19 @@ function boot() {
   // --- post ---
   const post = createComposite(caps, 12);
   const atmo = createAtmosphere(scene, sun, hemi, post);
+  if (restored.ok && restored.extra && restored.extra.atmo) {
+    const ea = restored.extra.atmo;
+    atmo.state = +ea.state || 0; atmo.target = +ea.target || 0; atmo.pinned = !!ea.pinned; atmo.drift = ea.drift !== false; atmo.driftClock = +ea.driftClock || 0;
+  }
   if (atmoQuery !== null) { atmo.setTarget(parseFloat(atmoQuery)); atmo.state = atmo.target; }
   let sceneTarget = null;
-  const pr = Math.min(window.devicePixelRatio || 1, 1.5);
+  let pr = 1.5;
+  let maxSubsteps = 2;
+  const gov = createGovernor(pickInitialTier({
+    coarse: window.matchMedia && window.matchMedia('(pointer: coarse)').matches,
+    mem: navigator.deviceMemory, cores: navigator.hardwareConcurrency, override: query.get('q'),
+  }));
+  const dprNow = () => window.devicePixelRatio || 1;
 
   function resize() {
     const w = Math.max(1, window.innerWidth);
@@ -167,16 +184,70 @@ function boot() {
     post.material.uniforms.uTexel.value.set(1 / sceneTarget.width, 1 / sceneTarget.height);
     post.material.uniforms.uMaxBlur.value = 6.0 * (sceneTarget.height / 900);
   }
+  // Apply a quality tier (spec 2.3): pixel ratio, bokeh taps, shadow map, flora count, sim substeps per frame.
+  function applyTier(i) {
+    const q = QUALITY[TIER_NAMES[i]];
+    pr = Math.min(dprNow(), q.pr);
+    maxSubsteps = q.substeps;
+    if (post.material.defines.TAPS !== q.taps) { post.material.defines.TAPS = q.taps; post.material.needsUpdate = true; }
+    if (sun.shadow.mapSize.x !== q.shadow) {
+      sun.shadow.mapSize.set(q.shadow, q.shadow);
+      if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+    }
+    flora.count = Math.min(flora.userData.full, q.flora);
+    resize();
+  }
   window.addEventListener('resize', resize);
-  resize();
+  applyTier(gov.tier);
 
   const ATMO_KEYS = { KeyQ: 0, KeyW: 0.5, KeyE: 1 };
   window.addEventListener('keydown', (ev) => {
     if (ev.code in ATMO_KEYS) { atmo.setTarget(ATMO_KEYS[ev.code]); syncAtmoUi(); }
     else if (ev.code === 'KeyM') { audio.setMuted(!audio.muted); muteUi.set(audio.muted); }
+    else if (ev.code === 'KeyP') takePhoto();
     else if (ev.code === 'KeyD') { atmo.pinned = false; atmo.drift = true; syncAtmoUi(); }
     else if (ev.code >= 'Digit1' && ev.code <= 'Digit4') ctl.setTool(parseInt(ev.code.slice(5), 10) - 1);
   });
+  // --- autosave every 20 s and whenever the page is hidden; photo mode on P ---
+  const save = () => { if (storage) saveToStorage(storage, world, { atmo: { state: atmo.state, target: atmo.target, pinned: atmo.pinned, drift: atmo.drift, driftClock: atmo.driftClock } }); };
+  setInterval(save, 20000);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+  window.addEventListener('pagehide', save);
+
+  const uiEl = document.getElementById('ui');
+  const photo = { busy: false, pending: false, paused: false, count: 0 };
+  function takePhoto() {
+    if (photo.busy) return;
+    photo.busy = true;
+    uiEl.classList.add('hidden');
+    setTimeout(() => {
+      photo.paused = true;
+      pr = Math.min(dprNow(), 2.0);
+      if (post.material.defines.TAPS !== 12) { post.material.defines.TAPS = 12; post.material.needsUpdate = true; }
+      resize();
+      photo.pending = true;
+    }, 380);
+  }
+  function finishPhoto(blob) {
+    if (blob) {
+      const d = new Date(), z = (n) => String(n).padStart(2, '0');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `living-mythos-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.png`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
+    photo.count++;
+    applyTier(gov.tier);
+    photo.paused = false; photo.busy = false;
+    uiEl.classList.remove('hidden');
+  }
+  createPhotoButton(uiEl, takePhoto);
+  const debugUi = DEBUG ? createDebugOverlay() : null;
+  let rock0 = 0;
+  const landSum = (a, b) => { let t = 0; for (let i = 0; i < a.length; i++) if (!world.mask[i]) t += a[i] + (b ? b[i] : 0); return t; };
+  if (DEBUG) rock0 = landSum(world.elev, world.sediment);
+
   ctl.setTool(0);
   syncAtmoUi();
   dock.showHint('Drag to orbit · pinch or scroll to zoom · pick a tool below', 6000);
@@ -190,7 +261,6 @@ function boot() {
   const camPrev = new THREE.Vector3().copy(camera.position);
   let frame = 0;
   const SIM_SPEED = 2.0;      // sim seconds per real second
-  const MAX_SUBSTEPS = 3;
 
   function renderFrame() {
     renderer.setRenderTarget(sceneTarget);
@@ -201,14 +271,20 @@ function boot() {
 
   renderer.setAnimationLoop((time) => {
     timer.update(time);
-    const dt = Math.min(timer.getDelta(), 0.05);
+    const rawDt = timer.getDelta();
+    const dt = Math.min(rawDt, 0.05);
     SHARED.uTime.value += dt;
+    if (!photo.busy) { const nt = governorSample(gov, Math.min(rawDt, 0.2)); if (nt >= 0) applyTier(nt); }
 
-    simAcc += dt * SIM_SPEED;
+    const t0 = DEBUG ? performance.now() : 0;
     let n = 0;
-    while (simAcc >= world.params.dt && n < MAX_SUBSTEPS) { simStep(world); simAcc -= world.params.dt; n++; }
-    if (n === 0 && simAcc > world.params.dt) simAcc = 0;
-    if (n > 0) packSimTextures(world, simTex);
+    if (!photo.paused) {
+      simAcc += dt * SIM_SPEED;
+      while (simAcc >= world.params.dt && n < maxSubsteps) { simStep(world); simAcc -= world.params.dt; n++; }
+      if (n === 0 && simAcc > world.params.dt) simAcc = 0;
+      if (n > 0) packSimTextures(world, simTex);
+    }
+    const simMs = DEBUG ? performance.now() - t0 : 0;
 
     controls.update();
     camSpeed += (camera.position.distanceTo(camPrev) / Math.max(dt, 1e-3) - camSpeed) * Math.min(1, dt * 6);
@@ -244,7 +320,16 @@ function boot() {
     world.params.ecoGrow = 1.3 - 0.6 * SHARED.uAurora.value - 0.3 * SHARED.uRain.value;
     post.material.uniforms.uFocusDist.value = camera.position.distanceTo(controls.target);
     renderFrame();
+    if (photo.pending) { photo.pending = false; canvas.toBlob(finishPhoto, 'image/png'); }
     frame++;
+    if (debugUi) {
+      debugUi.sample(dt, simMs);
+      debugUi.update(dt, () => {
+        let w = 0; for (let i = 0; i < world.water.length; i++) if (!world.mask[i]) w += world.water[i];
+        const rock = landSum(world.elev, world.sediment);
+        return { tier: TIER_NAMES[gov.tier], water: w, rock, drift: (rock - rock0) / rock0 * 100, villagers: world.civ.nV, structures: world.civ.nS, myths: world.civ.nM, particles: particles.count };
+      });
+    }
     if (DEBUG && frame === 1) console.info('[mythos] programs compiled:', renderer.info.programs.length);
   });
 
@@ -253,7 +338,7 @@ function boot() {
     // Test hook (debug builds only): lets tools/test-interact.mjs drive and inspect the live app.
     const pv = new THREE.Vector3();
     window.__mythos = {
-      world, ctl, atmo, camera, controls, flora, particles, structures, villagers, audio, director,
+      world, ctl, atmo, camera, controls, flora, particles, structures, villagers, audio, director, photo, gov, save, takePhoto, restored,
       project(x, y, z) {
         pv.set(x, y, z).project(camera);
         const r = canvas.getBoundingClientRect();
