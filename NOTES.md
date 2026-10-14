@@ -81,3 +81,4 @@ across all modules (flat scope after inlining; build fails on duplicates); no im
   rivers reach the rim in ~4-5 places (waterfalls exist but are modest); lush valleys cover ~5% (golden grain dominates);
   frame loop allocates ~30 KB/s in the real app (three internals + debug overlay), our own loops are allocation-free in Node tests.
 - Headless-test caveats: after ~3 GPU crashes Chrome disables WebGL for the session, so `test-interact` does at most 2 reloads.
+- Tried and failed to get a frame out of headless Chrome: default / swiftshader-webgl / --in-process-gpu / hidden canvas / bigger stack / no GPU watchdog. The GPU process segfaults within ~1 s of any real GL work regardless of presentation; in-process mode takes the whole renderer down. Don't spend more time on this here.
