@@ -18,4 +18,6 @@ export const SHARED = {
   uRain: { value: 0 },
   uNight: { value: 0 },
   uAurora: { value: 0 },
+  uCloud: { value: new THREE.Vector4(0, 0, 3, 0) },    // x, z, radius, strength (raincloud tool)
+  uBreeze: { value: new THREE.Vector4(0, 0, 2.5, 0) }, // x, z, radius, strength (breeze tool)
 };

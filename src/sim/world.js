@@ -16,6 +16,8 @@ export function createWorld(seed) {
     mask: new Uint8Array(GRID_N),        // 0 land, 1 rim (drain)
     rimOut: f(),                         // water drained over the cliff by the last substep, per rim cell
     sedTmp: f(),                         // scratch for sediment advection
+    ecoTmp: f(),                         // scratch for ecology diffusion
+    ecoCount: 0,
     springs: new Int32Array(TUNING.springCount),
     rimCells: null,
     params: {
@@ -23,6 +25,7 @@ export function createWorld(seed) {
       rain: TUNING.rain, evap: TUNING.evap, springRate: TUNING.springRate,
       rimDrainRate: TUNING.rimDrainRate, drainRim: true, erosion: true,
       kCap: TUNING.kCap, kErode: TUNING.kErode, kDeposit: TUNING.kDeposit,
+      ecoGrow: 1.0, evapMul: 1.0,
     },
     stats: { rimDrained: 0, flux: 0, substeps: 0 },
   };

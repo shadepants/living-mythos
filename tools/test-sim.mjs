@@ -2,6 +2,8 @@
 import { createWorld } from '../src/sim/world.js';
 import { GRID_N, GRID_W, GRID_H } from '../src/sim/grid.js';
 import { hydroStep } from '../src/sim/hydro.js';
+import { simStep } from '../src/sim/sim.js';
+import { ecologyStep } from '../src/sim/ecology.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { Rng } from '../src/sim/rng.js';
 
@@ -79,6 +81,33 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   check('zero-GC: heap does not grow over 1500 substeps', grew < 256 * 1024, `${(grew / 1024).toFixed(1)} KB`);
 }
 
+// 5b. ecology
+{
+  const w = createWorld(21);
+  // a wet patch, a dry patch, and a compacted wet patch
+  const idxWet = 64 * 128 + 50, idxDry = 64 * 128 + 80, idxPath = 64 * 128 + 65;
+  const patch = (c, fn) => { for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) fn(c + dz * 128 + dx); };
+  for (const c of [idxWet, idxDry, idxPath]) patch(c, (i) => { w.mask[i] = 0; w.fertility[i] = 0.5; w.moisture[i] = 0; w.water[i] = 0; w.elev[i] = 0.5; });
+  w.culturalBias[idxWet] = 1;
+  w.params.rain = 0; w.params.ecoGrow = 1;
+  const hold = () => { patch(idxWet, (i) => { w.water[i] = 0.08; }); patch(idxPath, (i) => { w.water[i] = 0.08; w.compaction[i] = 0.9; }); };
+  for (let k = 0; k < 600; k++) { hold(); ecologyStep(w, 0.1); }
+  check('ecology: wet soil gains moisture and fertility', w.moisture[idxWet] > 0.6 && w.fertility[idxWet] > 0.8, `m ${w.moisture[idxWet].toFixed(2)} f ${w.fertility[idxWet].toFixed(2)}`);
+  check('ecology: dry soil loses fertility', w.fertility[idxDry] < 0.2, `f ${w.fertility[idxDry].toFixed(2)}`);
+  check('ecology: compaction suppresses fertility even when wet', w.fertility[idxPath] < w.fertility[idxWet] - 0.3, `path ${w.fertility[idxPath].toFixed(2)} vs ${w.fertility[idxWet].toFixed(2)}`);
+  check('ecology: cultural bias diffuses to neighbours', w.culturalBias[idxWet + 1] > 0.05 || w.culturalBias[idxWet - 1] > 0.05, `${w.culturalBias[idxWet + 1].toFixed(3)}`);
+  let ok = true;
+  for (let i = 0; i < GRID_N; i++) { if (!(w.fertility[i] >= 0 && w.fertility[i] <= 1 && w.moisture[i] >= 0 && w.moisture[i] <= 1 && w.compaction[i] >= 0 && Math.abs(w.culturalBias[i]) <= 1)) { ok = false; break; } }
+  check('ecology: all channels stay in range', ok);
+  const w2 = createWorld(22);
+  steps(w2, 50); global.gc();
+  const h0 = process.memoryUsage().heapUsed;
+  for (let k = 0; k < 800; k++) simStep(w2);
+  global.gc();
+  const grew = process.memoryUsage().heapUsed - h0;
+  check('zero-GC: simStep (hydro+ecology) does not grow the heap', grew < 256 * 1024, `${(grew / 1024).toFixed(1)} KB`);
+}
+
 // 6. prewarm produces a believable island
 {
   const w = createWorld(1337);
@@ -102,6 +131,10 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   check('prewarm: erosion visibly carved terrain', carved > 150, `${carved} cells`);
   check('prewarm: water reaches the rim (waterfalls)', w.stats.rimDrained > 1, `${w.stats.rimDrained.toFixed(1)}`);
   check('prewarm: under 3 s on this device', ms < 3000, `${ms.toFixed(0)} ms`);
+  let lush = 0, scrub = 0;
+  for (let i = 0; i < GRID_N; i++) if (!w.mask[i]) { if (w.fertility[i] > 0.7) lush++; else if (w.fertility[i] < 0.3) scrub++; }
+  console.log(`      fertility after prewarm: lush ${(lush / land * 100).toFixed(1)}%, scrub ${(scrub / land * 100).toFixed(1)}%`);
+  check('prewarm: both lush valleys and dry scrub exist', lush / land > 0.03 && scrub / land > 0.03, `lush ${(lush / land * 100).toFixed(1)}% scrub ${(scrub / land * 100).toFixed(1)}%`);
 
   if (process.argv.includes('--map')) {
     const ramp = ' .:-=+*#%@';

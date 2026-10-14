@@ -4,11 +4,12 @@ import { detectCaps } from './gl/caps.js';
 import { createSceneTarget, createComposite } from './gl/post.js';
 import { SHARED } from './gl/shared.js';
 import { createSimTextures, packSimTextures } from './gl/simtex.js';
+import { createFlora } from './gl/flora.js';
 import { createSkyDome } from './gl/sky.js';
 import { createAtmosphere } from './gl/atmo.js';
 import { createGridGeometry, createIslandTop, createWaterSurface, createBasaltSkirt } from './gl/terrain.js';
 import { createWorld } from './sim/world.js';
-import { hydroStep } from './sim/hydro.js';
+import { simStep } from './sim/sim.js';
 import { prewarm } from './sim/prewarm.js';
 import { TUNING } from './sim/tuning.js';
 
@@ -28,6 +29,10 @@ function boot() {
     fail('Living Mythos needs WebGL2, which this browser does not provide.');
     return;
   }
+  // Simulation first: the pre-warm blocks for a moment, and the GL context should not sit idle behind it.
+  const world = createWorld(query.has('seed') ? parseInt(query.get('seed'), 10) : TUNING.seedDefault);
+  prewarm(world);
+
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
@@ -42,9 +47,6 @@ function boot() {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.NoToneMapping;
 
-  // --- simulation ---
-  const world = createWorld(query.has('seed') ? parseInt(query.get('seed'), 10) : TUNING.seedDefault);
-  prewarm(world);
   const simTex = createSimTextures(caps.floatLinear);
   SHARED.uSimTexA.value = simTex.texA;
   SHARED.uSimTexB.value = simTex.texB;
@@ -76,6 +78,8 @@ function boot() {
   scene.add(createIslandTop(grid, caps));
   scene.add(createBasaltSkirt());
   scene.add(createWaterSurface(grid, caps));
+  const flora = createFlora(caps, 3500);
+  scene.add(flora);
 
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(0, 0, 0);
@@ -139,16 +143,20 @@ function boot() {
 
     simAcc += dt * SIM_SPEED;
     let n = 0;
-    while (simAcc >= world.params.dt && n < MAX_SUBSTEPS) { hydroStep(world); simAcc -= world.params.dt; n++; }
+    while (simAcc >= world.params.dt && n < MAX_SUBSTEPS) { simStep(world); simAcc -= world.params.dt; n++; }
     if (n === 0 && simAcc > world.params.dt) simAcc = 0;
     if (n > 0) packSimTextures(world, simTex);
 
     controls.update();
     atmo.update(dt);
+    // the weather feeds back into the sim: monsoon rains harder and evaporates less; golden hour grows crops fastest
+    world.params.rain = TUNING.rain * (1 + 5 * SHARED.uRain.value);
+    world.params.evapMul = 1 - 0.6 * SHARED.uRain.value;
+    world.params.ecoGrow = 1.3 - 0.6 * SHARED.uAurora.value - 0.3 * SHARED.uRain.value;
     post.material.uniforms.uFocusDist.value = camera.position.distanceTo(controls.target);
     renderFrame();
     frame++;
-    if (DEBUG && frame === 3) console.info('[mythos] programs compiled:', renderer.info.programs.length);
+    if (DEBUG && frame === 1) console.info('[mythos] programs compiled:', renderer.info.programs.length);
   });
 
   if (DEBUG) console.info('[mythos] caps', JSON.stringify(caps));
