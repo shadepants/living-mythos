@@ -21,11 +21,11 @@ export function createRingFx(world) {
       let k;
       while ((k = nextEvent(world.events, cursor)) >= 0) {
         const t = world.events.type[k], x = world.events.x[k], z = world.events.z[k];
-        if (t === EV_SCULPT) add(x, z, 0, 0.8, 1.6, 4.0);
-        else if (t === EV_MONOLITH_PLACE) add(x, z, 1, 1.3, 3.0, 5.0);
-        else if (t === EV_MONOLITH_PULSE) add(x, z, 1, 0.8, 3.4, 4.2);
-        else if (t === EV_BUILD_DONE) add(x, z, 2, 0.7, 1.8, 3.0);
-        else if (t === EV_REVIVE) add(x, z, 1, 1.0, 2.6, 4.5);
+        if (t === EV_SCULPT) add(x, z, 0, 0.42, 1.5, 4.0);
+        else if (t === EV_MONOLITH_PLACE) add(x, z, 1, 0.8, 2.8, 5.0);
+        else if (t === EV_MONOLITH_PULSE) add(x, z, 1, 0.5, 3.2, 4.2);
+        else if (t === EV_BUILD_DONE) add(x, z, 2, 0.45, 1.6, 3.0);
+        else if (t === EV_REVIVE) add(x, z, 1, 0.65, 2.4, 4.5);
       }
       for (let s = 0; s < 8; s++) if (SHARED.uTime.value - birth[s] > life[s]) SHARED.uRingB.value[s].x = 0;
     },

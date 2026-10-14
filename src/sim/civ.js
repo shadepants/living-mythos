@@ -368,6 +368,12 @@ function scanForOrders(world) {
     const f = world.frustration[i];
     if (f > bestF && world.engCover[i] === 0) { bestF = f; bestI = i; }
   }
+  for (let k = 0; k < 40; k++) {
+    const v = (rng.next() * civ.nV) | 0;
+    const i = cellOf(civ.vX[v], civ.vZ[v]);
+    const f = world.frustration[i];
+    if (f > bestF && world.engCover[i] === 0 && world.mask[i] === 0) { bestF = f; bestI = i; }
+  }
   if (bestI < 0) return;
   const gx = bestI % GRID_W, gz = (bestI / GRID_W) | 0;
   const x = -10 + (gx + 0.5) * CELL_SIZE, z = -10 + (gz + 0.5) * CELL_SIZE;

@@ -73,13 +73,14 @@ export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
   vec3 clayLo = lin(vec3(0.58, 0.40, 0.28));
   vec3 clayHi = lin(vec3(0.82, 0.68, 0.48));
   vec3 basalt = lin(vec3(0.20, 0.20, 0.24));
-  vec3 dryOchre = lin(vec3(0.66, 0.54, 0.30));
-  vec3 lush = lin(vec3(0.20, 0.52, 0.26));
+  vec3 dryOchre = lin(vec3(0.62, 0.54, 0.34));
+  vec3 lush = lin(vec3(0.20, 0.50, 0.22));
   float hq = floor(elevF * 8.0) / 8.0;
   vec3 col = mix(clayLo, clayHi, clamp(hq / 1.2, 0.0, 1.0));
   float fert = clamp(tB.g, 0.0, 1.0) * (1.0 - tB.b * 0.8);
-  vec3 greens = mix(dryOchre, lush, smoothstep(0.3, 0.75, fert));
-  col = mix(col, greens, smoothstep(0.1, 0.5, fert) * (1.0 - steep));
+  vec3 grain = lin(vec3(0.74, 0.66, 0.30));
+  vec3 greens = mix(mix(dryOchre, grain, smoothstep(0.15, 0.42, fert)), lush, smoothstep(0.42, 0.8, fert));
+  col = mix(col, greens, smoothstep(0.04, 0.3, fert) * (1.0 - steep));
   col = mix(col, basalt, clamp(steep * 1.4 + smoothstep(0.83, 0.9, rr) * 0.9, 0.0, 1.0));
   col = mix(col, lin(vec3(0.34, 0.25, 0.18)), smoothstep(0.15, 0.6, tB.b) * 0.85);
 
@@ -115,8 +116,8 @@ export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
     if (rB.x > 0.0 && age > 0.0 && age < rB.y) {
       float R = age * rB.z;
       float d = length(vWP.xz - rA.xy);
-      float band = exp(-pow((d - R) / 0.33, 2.0));
-      float band2 = exp(-pow((d - R * 0.62) / 0.22, 2.0)) * step(0.5, rA.w) * 0.6;
+      float band = exp(-pow((d - R) / 0.2, 2.0));
+      float band2 = exp(-pow((d - R * 0.62) / 0.14, 2.0)) * step(0.5, rA.w) * 0.6;
       float fade = 1.0 - age / rB.y;
       vec3 gold = vec3(1.0, 0.72, 0.3), cyan = vec3(0.3, 0.95, 1.0), dust = vec3(0.75, 0.72, 0.65);
       vec3 rc = rA.w < 0.5 ? gold : (rA.w < 1.5 ? mix(gold, cyan, band2 / (band + band2 + 1e-3)) : dust);
@@ -191,7 +192,7 @@ void main() {
   vec2 grad = vec2(hR - hL, hD - hU) / (2.0 * uCell);
   vec2 wp = vWP.xz * 5.0 - flow * t * 0.6;
   vec2 rip = vec2(vnoise(wp + t * 0.3) - 0.5, vnoise(wp.yx * 1.3 - t * 0.25) - 0.5);
-  vec3 n = normalize(vec3(-grad.x * 1.5 - rip.x * (0.18 + 0.4 * uRain), 1.0, -grad.y * 1.5 - rip.y * (0.18 + 0.4 * uRain)));
+  vec3 n = normalize(vec3(-grad.x * 0.6 - rip.x * (0.07 + 0.3 * uRain), 1.0, -grad.y * 0.6 - rip.y * (0.07 + 0.3 * uRain)));
 
   vec3 V = normalize(cameraPosition - vWP);
   vec3 L = normalize(uSunDir);
@@ -200,28 +201,29 @@ void main() {
 
   // Beer-Lambert absorption over depth
   float trans = exp(-26.0 * d);
-  vec3 shallowC = lin(vec3(0.20, 0.55, 0.52));
-  vec3 deepC = lin(vec3(0.03, 0.17, 0.26));
+  vec3 shallowC = lin(vec3(0.16, 0.58, 0.62));
+  vec3 deepC = lin(vec3(0.02, 0.14, 0.30));
   vec3 body = mix(deepC, shallowC, trans) * (0.45 + 0.55 * max(dot(n, L), 0.0)) * (0.5 + 0.5 * uSunColor);
 
   vec3 sky = mix(uSkyHor, uSkyTop, clamp(R.y, 0.0, 1.0));
-  vec3 col = mix(body, sky, clamp(fres, 0.0, 1.0));
+  vec3 col = mix(body, sky, clamp(fres * 0.55, 0.0, 1.0));
   col += uSunColor * pow(max(dot(R, L), 0.0), 220.0) * 2.5;
 
   // whitewater streaks along fast flow, and shoreline foam / ripples
   vec2 fdir = spd > 0.01 ? flow / spd : vec2(1.0, 0.0);
   vec2 fp = vec2(dot(vWP.xz, fdir), dot(vWP.xz, vec2(-fdir.y, fdir.x)));
-  float streak = vnoise(vec2(fp.x * 3.0 - t * spd * 0.8, fp.y * 14.0));
-  float foam = smoothstep(0.7, 2.2, spd) * smoothstep(0.35, 0.8, streak);
-  float shore = 1.0 - smoothstep(0.008, 0.03, d);
-  float ring = 0.5 + 0.5 * sin(d * 420.0 - t * 2.5);
-  foam = clamp(foam + shore * (0.35 + 0.35 * ring), 0.0, 1.0);
-  col = mix(col, vec3(0.92, 0.96, 0.98), foam * 0.8);
+  float spc = min(spd, 2.5);
+  float streak = vnoise(vec2(fp.x * 2.2 - t * spc * 0.35, fp.y * 6.0));
+  float foam = smoothstep(2.4, 5.0, spd) * smoothstep(0.5, 0.85, streak) * 0.7 * (1.0 - smoothstep(0.05, 0.13, d));   // whitewater only where it is shallow and fast
+  float shore = 1.0 - smoothstep(0.008, 0.028, d);
+  float ring = 0.5 + 0.5 * sin(d * 110.0 - t * 1.6);
+  foam = clamp(foam + shore * (0.25 + 0.25 * ring), 0.0, 0.75);
+  col = mix(col, vec3(0.92, 0.96, 0.98), foam * 0.6);
 
   float fd = length(vWP - cameraPosition);
   col = mix(col, uFogColor, 1.0 - exp(-uFogDensity * uFogDensity * fd * fd));
   float alpha = mix(0.35, 0.95, 1.0 - trans) * smoothstep(0.008, 0.022, d);
-  gl_FragColor = vec4(col, max(alpha, foam * 0.85));
+  gl_FragColor = vec4(col, max(alpha, foam * 0.6));
 }
 `;
 
@@ -265,7 +267,7 @@ float cocAt(vec2 uv) {
   float dist = viewDist(texture2D(tDepth, uv).x);
   float rel = abs(dist - uFocusDist) / uFocusDist;
   float inSlab = 1.0 - smoothstep(0.05, 0.24, rel);
-  float depthBlur = smoothstep(0.30, 1.25, rel) * 0.7;
+  float depthBlur = smoothstep(0.30, 1.25, rel) * 0.26;
   return clamp(tilt * (1.0 - 0.93 * inSlab) + depthBlur, 0.0, 1.0);
 #endif
 }

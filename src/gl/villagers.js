@@ -44,7 +44,7 @@ export function createVillagers(caps) {
   mesh.receiveShadow = true;
 
   const m = new THREE.Matrix4(), nrm = new THREE.Vector3(), nrmS = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3(), pos = new THREE.Vector3();
-  const SCALE = 1.5;
+  const SCALE = 1.1;
   const sa = state.array;
 
   // Orient along velocity, pitch into the slope, bob with the walk cycle (spec 4.2 Pool 3).

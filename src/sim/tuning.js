@@ -28,12 +28,12 @@ export const TUNING = Object.freeze({
   ecoEvery: 4,
   moistAbsorb: 0.8,       // 1/s toward standing-water wetness
   moistFromWater: 40.0,   // wetness = min(1, water * this)
-  moistFromRain: 72.0,    // soil moisture gained per unit rain depth
+  moistFromRain: 190,    // soil moisture gained per unit rain depth
   moistEvap: 0.03,        // 1/s
-  moistElevEvap: 1.4,     // uplands dry faster: evap *= 1 + this * elev
+  moistElevEvap: 3.5,     // uplands dry faster: evap *= 1 + this * elev
   moistDiffuse: 0.4,
-  fertGrow: 0.085,
-  fertDecay: 0.04,
+  fertGrow: 0.12,
+  fertDecay: 0.05,
   fertCompactDecay: 0.08,
   compactRelax: 0.01,     // 1/s
   biasDiffuse: 0.05,

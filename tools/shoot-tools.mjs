@@ -1,0 +1,40 @@
+// Visual check of the four tools: drives the rendered app with the real mouse and saves PNGs (llvmpipe).
+// Usage: node tools/shoot-tools.mjs outDir
+import http from 'node:http';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import puppeteer from 'puppeteer-core';
+process.env.LIBGL_ALWAYS_SOFTWARE = '1'; process.env.GALLIUM_DRIVER = 'llvmpipe';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const outDir = process.argv[2] || '/tmp/tools'; mkdirSync(outDir, { recursive: true });
+const base = join(homedir(), '.cache/ms-playwright');
+const exe = join(base, readdirSync(base).find(d => d.startsWith('chromium_headless_shell')), 'chrome-headless-shell-linux-arm64/chrome-headless-shell');
+const server = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end(readFileSync(resolve(root, 'dist/index.html'))); }).listen(0);
+const browser = await puppeteer.launch({ executablePath: exe, headless: 'shell', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=gl-egl', '--ignore-gpu-blocklist', '--disable-frame-rate-limit', '--disable-gpu-vsync', '--window-size=900,600'] });
+const page = await browser.newPage(); await page.setViewport({ width: 900, height: 600 });
+page.on('pageerror', e => console.log('[pageerror]', e.message));
+page.on('console', m => { if (m.type() === 'error') console.log('[console.error]', m.text().slice(0, 300)); });
+await page.goto(`http://localhost:${server.address().port}/?debug=1&fresh=1`);
+await page.waitForFunction(() => window.__mythos, { timeout: 60000 });
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+await sleep(3000);
+const snap = async (name) => { const u = await page.evaluate(() => window.__mythos.snapshot()); writeFileSync(join(outDir, name + '.png'), Buffer.from(u.split(',')[1], 'base64')); console.log('saved', name); };
+const at = (x, z) => page.evaluate((x, z) => { const m = window.__mythos; const w = m.world; const gx = Math.round((x + 10) / 20 * 128 - 0.5), gz = Math.round((z + 10) / 20 * 128 - 0.5); return m.project(x, w.elev[gz * 128 + gx], z); }, x, z);
+// look down at a quiet patch so the effects read clearly
+await page.evaluate(() => { const m = window.__mythos; m.controls.target.set(-1.5, 0.3, 1.5); m.camera.position.set(-1.5, 9, 10); m.controls.update(); });
+await sleep(800);
+const [px, py] = await at(-1.5, 1.5);
+await page.keyboard.press('Digit1');
+await page.mouse.move(px, py); await sleep(500);
+await snap('1_sculpt_hover');
+await page.mouse.down(); await sleep(5000); await snap('2_sculpt_holding'); await page.mouse.up();
+await sleep(1500); await snap('3_sculpt_hill');
+await page.keyboard.press('Digit2'); await page.mouse.move(px + 120, py); await sleep(600);
+await page.mouse.down(); await sleep(5000); await snap('4_raincloud'); await page.mouse.up();
+await page.keyboard.press('Digit3'); await page.mouse.move(px - 130, py + 10); await sleep(500);
+await page.mouse.down(); await sleep(300); await page.mouse.up(); await sleep(1500); await snap('5_monolith_rings');
+await sleep(6000); await snap('6_monolith_later');
+await page.keyboard.press('Digit4'); await page.mouse.move(px - 60, py - 30); await page.mouse.move(px + 40, py - 20, { steps: 8 }); await sleep(700); await snap('7_breeze');
+await browser.close(); server.close();

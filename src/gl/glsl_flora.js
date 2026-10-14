@@ -25,11 +25,11 @@ export const GLSL_FLORA_VERT_POS = /* glsl */`
   float fert = fB.g, comp = fB.b, bias = fB.a, wat = fA.g;
   float arche = aInstanceState.x, grow = aInstanceState.y;
   float part = aPart.x, yn = aPart.y;
-  float vis = (part > 0.25 && arche < 0.78) ? 0.0 : 1.0;
+  float vis = (part > 0.25 && arche < 0.9) ? 0.0 : 1.0;
   float hgt = mix(0.22, 1.0, smoothstep(0.08, 0.85, fert)) * grow * (1.0 - 0.8 * comp) * (0.8 + 0.5 * arche);
   hgt *= 1.0 - smoothstep(0.015, 0.04, wat);
   float wid = mix(0.6, 1.0, hgt);
-  vec3 transformed = position * vec3(wid, hgt, wid) * vis;
+  vec3 transformed = position * vec3(wid, hgt, wid) * 0.58 * vis;
 
   float t = uTime;
   float gust = 0.5 + 0.5 * sin(t * 0.7 + fBase.x * 0.35 + fBase.z * 0.21);
@@ -61,7 +61,7 @@ export const GLSL_FLORA_VERT_POS = /* glsl */`
   vec3 bio = mix(vec3(0.05, 0.85, 0.95), vec3(0.62, 0.22, 1.0), hv);
   float glowAmt = lum * (0.30 + 0.70 * uNight) * (0.25 + 0.75 * yn) + aInstanceState.w * (0.4 + 0.6 * yn);
   vFloraCol = mix(fc, bio * 0.5, lum * 0.6);
-  vGlow = bio * glowAmt * 1.8;
+  vGlow = bio * glowAmt * 1.8 + fc * 0.40 * uNight;   // moonlit scatter keeps the crops readable after dark
 `;
 
 export const GLSL_FLORA_FRAG_COLOR = /* glsl */`

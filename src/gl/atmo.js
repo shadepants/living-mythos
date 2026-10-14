@@ -24,8 +24,8 @@ const PRESETS = [
     hemiI: 1.0, fog: [0.85, 0.56, 0.42], fogD: 0.010, skyTop: [0.20, 0.17, 0.52], skyHor: [1.0, 0.62, 0.34], exposure: 1.25,
     wet: 0.0, wind: 0.35, rain: 0.0, night: 0.0, aurora: 0.0 }),
   // Midnight Aurora: deep indigo, cool moon key
-  makePreset({ sunDir: [0.40, 0.62, -0.45], sunColor: [0.40, 0.52, 1.0], sunI: 0.95, hemiSky: [0.08, 0.12, 0.34], hemiGround: [0.03, 0.03, 0.09],
-    hemiI: 0.9, fog: [0.025, 0.035, 0.10], fogD: 0.013, skyTop: [0.005, 0.01, 0.06], skyHor: [0.03, 0.06, 0.20], exposure: 1.9,
+  makePreset({ sunDir: [0.40, 0.62, -0.45], sunColor: [0.45, 0.58, 1.0], sunI: 1.9, hemiSky: [0.14, 0.20, 0.50], hemiGround: [0.05, 0.05, 0.13],
+    hemiI: 1.5, fog: [0.04, 0.06, 0.17], fogD: 0.012, skyTop: [0.003, 0.007, 0.04], skyHor: [0.02, 0.04, 0.13], exposure: 2.4,
     wet: 0.1, wind: 0.25, rain: 0.0, night: 1.0, aurora: 1.0 }),
   // Monsoon: overcast slate, wet sheen, wind
   makePreset({ sunDir: [0.20, 0.75, 0.30], sunColor: [0.58, 0.66, 0.74], sunI: 1.1, hemiSky: [0.40, 0.46, 0.52], hemiGround: [0.20, 0.22, 0.24],

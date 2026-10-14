@@ -7,11 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import puppeteer from 'puppeteer-core';
 
+// Mesa llvmpipe is the software GL that stays alive in this PRoot (SwiftShader segfaults within ~1 s).
+process.env.LIBGL_ALWAYS_SOFTWARE = '1'; process.env.GALLIUM_DRIVER = 'llvmpipe';
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const base = join(homedir(), '.cache/ms-playwright');
 const exe = join(base, readdirSync(base).find(d => d.startsWith('chromium_headless_shell')), 'chrome-headless-shell-linux-arm64/chrome-headless-shell');
 const server = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end(readFileSync(resolve(root, 'dist/index.html'))); }).listen(0);
-const browser = await puppeteer.launch({ executablePath: exe, headless: 'shell', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader', '--window-size=900,600'] });
+const browser = await puppeteer.launch({ executablePath: exe, headless: 'shell', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=gl-egl', '--ignore-gpu-blocklist', '--disable-frame-rate-limit', '--disable-gpu-vsync', '--window-size=900,600'] });
 const page = await browser.newPage();
 await page.setViewport({ width: 900, height: 600, hasTouch: true });
 const errors = [];
@@ -25,14 +28,14 @@ async function gotoApp(qs) {
   }
   throw new Error('app never booted');
 }
-await gotoApp('debug=1&fresh=1');
+await gotoApp('debug=1&norender=1&fresh=1');
 await new Promise(r => setTimeout(r, 500));
 
 let failed = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const ev = (fn, ...a) => page.evaluate(fn, ...a);
-const screenOf = (x, z) => ev((x, z) => { const m = window.__mythos; return m.project(x, window.__mythos.world.elev[0] * 0 + 0.5, z); }, x, z);
+const screenOf = (x, z) => ev((x, z) => { const m = window.__mythos; const w = m.world; const gx = Math.round((x + 10) / 20 * 128 - 0.5), gz = Math.round((z + 10) / 20 * 128 - 0.5); return m.project(x, w.elev[gz * 128 + gx], z); }, x, z);
 const elevAt = (x, z) => ev((x, z) => { const w = window.__mythos.world; const gx = Math.round((x + 10) / 20 * 128 - 0.5), gz = Math.round((z + 10) / 20 * 128 - 0.5); return w.elev[gz * 128 + gx]; }, x, z);
 const sumArr = (name) => ev((n) => { const a = window.__mythos.world[n]; let s = 0; for (let i = 0; i < a.length; i++) s += a[i]; return s; }, name);
 const monoCount = () => ev(() => { const m = window.__mythos.world.monoliths; let c = 0; for (let k = 0; k < 8; k++) c += m[k * 4 + 3]; return c; });
@@ -156,7 +159,7 @@ check('photo mode finishes and restores the UI', (await ev(() => window.__mythos
 const px = await screenOf(-1.2, 0.8);
 const eBefore = await elevAt(-1.2, 0.8);
 await ev(() => window.__mythos.save());
-await gotoApp('debug=1');
+await gotoApp('debug=1&norender=1');
 check('reload restores the saved island', (await ev(() => window.__mythos.restored.ok)) === true);
 const eAfter = await elevAt(-1.2, 0.8);
 check('the sculpted terrain survives a reload', Math.abs(eAfter - eBefore) < 0.05, `${eBefore.toFixed(3)} -> ${eAfter.toFixed(3)}`);

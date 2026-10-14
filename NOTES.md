@@ -1,8 +1,8 @@
 # Living Mythos — build notes
 
 ## Status
-- **Current milestone:** M10 done — every milestone in SPEC.md is implemented. **Nothing has been seen rendered on a real GPU** (headless Chrome's SwiftShader crashes in this PRoot): shaders compile (smoke test: 12 programs, 0 errors) and all logic is tested, but colours, lighting, scale and composition are unverified. First thing to do on the phone: open it, check each atmosphere (Q/W/E), and send screenshots/console output.
-- **Headless Chrome (important):** `~/.cache/ms-playwright/chromium_headless_shell-*` exists; `tools/smoke.mjs`
+- **Current milestone:** M10 done — every milestone in SPEC.md is implemented AND has now been seen rendered: frames are captured headlessly on Mesa llvmpipe (`tools/snap.mjs`, `tools/shoot-tools.mjs`, results in `docs/screens/`) and tuned from them. Not yet checked on the actual phone GPU (performance/feel there is unknown); first thing to do on the phone: open it, try Q/W/E, and report the frame rate (`?debug=1`) and anything that looks off.
+- **Headless Chrome (OLD, superseded below):** `~/.cache/ms-playwright/chromium_headless_shell-*` exists; `tools/smoke.mjs`
   drives it via puppeteer-core. SwiftShader's GPU process **segfaults ~1s after the first draw in this PRoot**
   (every flag combo tried), so there are **no screenshots/pixel checks**. But shader compile/link errors and JS
   exceptions DO surface first (verified by injecting a deliberate GLSL error), and `?debug=1` logs
@@ -82,3 +82,10 @@ across all modules (flat scope after inlining; build fails on duplicates); no im
   frame loop allocates ~30 KB/s in the real app (three internals + debug overlay), our own loops are allocation-free in Node tests.
 - Headless-test caveats: after ~3 GPU crashes Chrome disables WebGL for the session, so `test-interact` does at most 2 reloads.
 - Tried and failed to get a frame out of headless Chrome: default / swiftshader-webgl / --in-process-gpu / hidden canvas / bigger stack / no GPU watchdog. The GPU process segfaults within ~1 s of any real GL work regardless of presentation; in-process mode takes the whole renderer down. Don't spend more time on this here.
+
+## Rendering verification (this supersedes the earlier 'no GPU' notes)
+- **What works:** headless Chrome on **Mesa llvmpipe** (software GL) — flags `--use-gl=angle --use-angle=gl-egl --ignore-gpu-blocklist --disable-frame-rate-limit --disable-gpu-vsync` plus env `LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe`. SwiftShader is what segfaults here; llvmpipe (and lavapipe via `--use-angle=vulkan`) stay alive. Without the vsync flags `requestAnimationFrame` stalls. llvmpipe is slow (shader compile ~5 s, a frame takes seconds), so use `?debug=1&norender=1` for time-based logic tests (the loop and sim run, only the GL draw is skipped).
+- `tools/snap.mjs out.png [--query atmo=0.5] [--wait s] [--eval "js"]` renders the app and saves the canvas; `tools/shoot-tools.mjs dir` drives the four tools with the real mouse and saves frames.
+- Things only real frames revealed (all fixed): flora far too tall/dense (hid terrain), flat below-horizon sky (the camera looks down, so the dome showed only fog colour — now a cloud sea below the horizon), black night (night light/exposure raised, crops moonlit), monotone terrain (fertility now relaxes toward a moisture x soil-quality target; shader palette mid-fertility = golden grain), water zebra/marble from foam on fast flow (foam only shallow+fast), ring waves/cursor blowing out to cream, lantern diamonds, villagers as tall as houses, rain particles 25x too big, stars invisible (now a spherical grid).
+- Tuning knobs worth knowing: `src/gl/atmo.js` presets (exposure per state), `glsl_flora.js` scale (0.58), `TUNING.fertGrow/moistFromRain/moistElevEvap`, `fxbridge.js` ring strengths.
+- Remaining visual ideas: aurora/stars only show when orbiting low (default view looks slightly down; a hint appears when choosing Aurora); waterfall spray is subtle; structures don't cast shadows.

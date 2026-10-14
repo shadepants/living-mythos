@@ -52,7 +52,7 @@ const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${na
   const at_ = (v) => { at.setTarget(v); at.state = v; at.update(0.016); return { i: sun.intensity, a: SHARED.uAurora.value, r: SHARED.uRain.value, n: SHARED.uNight.value, w: SHARED.uWet.value, e: comp.material.uniforms.uExposure.value }; };
   const g = at_(0), a = at_(0.5), m = at_(1), q = at_(0.25);
   check('atmosphere: golden hour is bright with no aurora/rain', g.i > 3 && g.a === 0 && g.r === 0, JSON.stringify(g));
-  check('atmosphere: aurora state is night with aurora', a.a === 1 && a.n === 1 && a.i < 1.2, JSON.stringify(a));
+  check('atmosphere: aurora state is night with aurora', a.a === 1 && a.n === 1 && a.i < g.i, JSON.stringify(a));
   check('atmosphere: monsoon has rain and wet sheen', m.r === 1 && m.w === 1, JSON.stringify(m));
   check('atmosphere: 0.25 blends smoothly between golden and aurora', q.i < g.i && q.i > a.i && q.a > 0 && q.a < 1, JSON.stringify(q));
   // easing: from golden toward monsoon should move monotonically

@@ -43,7 +43,13 @@ void main() {
   vec3 d = normalize(vDir);
   float h = clamp(d.y, 0.0, 1.0);
   vec3 col = mix(uSkyHor, uSkyTop, pow(h, 0.55));
-  col = mix(col, uFogColor, smoothstep(0.02, -0.18, d.y));
+  // below the horizon the island floats over a sea of cloud: horizon haze deepening toward the nadir, with soft billows
+  float below = smoothstep(0.0, -0.85, d.y);
+  vec2 cq = d.xz / (abs(d.y) + 0.22);
+  float billow = skyFbm(cq * 1.1 + vec2(uTime * 0.01, 0.0));
+  vec3 seaCol = mix(uSkyHor, mix(uSkyTop, uFogColor, 0.35) * 0.8, below);
+  seaCol *= 0.86 + 0.28 * billow;
+  col = mix(col, seaCol, smoothstep(0.03, -0.04, d.y));
 
   // sun / moon disc and halo
   float sd = max(dot(d, normalize(uSunDir)), 0.0);
@@ -52,12 +58,14 @@ void main() {
   // stars (night only)
   float starAmt = clamp(uAurora + uNight * 0.3, 0.0, 1.0) * (1.0 - uRain);
   if (starAmt > 0.01 && d.y > 0.0) {
-    vec3 sp = d * 160.0;
-    vec3 cell = floor(sp);
-    float r = skyHash(cell.xy + cell.z * 17.0);
+    vec2 su = vec2(atan(d.z, d.x) * 110.0, d.y * 210.0);
+    vec2 cell = floor(su);
+    vec2 lf = fract(su) - 0.5;
+    float r = skyHash(cell);
+    vec2 jit = vec2(skyHash(cell + 17.3), skyHash(cell + 41.7)) - 0.5;
     float tw = 0.6 + 0.4 * sin(uTime * 2.0 + r * 40.0);
-    float star = step(0.9965, r) * smoothstep(0.5, 0.0, length(fract(sp) - 0.5));
-    col += vec3(0.8, 0.85, 1.0) * star * tw * starAmt * smoothstep(0.0, 0.25, d.y);
+    float star = step(0.93, r) * smoothstep(0.17, 0.0, length(lf - jit * 0.6)) * (0.35 + 0.65 * fract(r * 91.0));
+    col += vec3(0.85, 0.9, 1.0) * star * tw * starAmt * smoothstep(0.0, 0.2, d.y) * 1.6;
   }
 
   // aurora curtains
@@ -71,7 +79,7 @@ void main() {
     float vert = smoothstep(0.04, 0.18, d.y) * (1.0 - smoothstep(0.55, 0.95, d.y));
     vec3 g = vec3(0.10, 1.0, 0.50), t = vec3(0.10, 0.85, 0.90), v = vec3(0.60, 0.22, 0.98);
     vec3 ac = mix(mix(g, t, smoothstep(0.1, 0.5, w2)), v, smoothstep(0.32, 0.62, d.y + 0.18 * (w1 - 0.5)));
-    col += ac * band * streak * vert * 1.7 * uAurora;
+    col += ac * band * streak * vert * 3.6 * uAurora;
   }
 
   // monsoon cloud deck

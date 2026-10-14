@@ -20,6 +20,7 @@ export function createWorld(seed) {
     rimOut: f(),                         // water drained over the cliff by the last substep, per rim cell
     sedTmp: f(),                         // scratch for sediment advection
     ecoTmp: f(),                         // scratch for ecology diffusion
+    soil: f(),                           // fixed soil quality 0.55..1.45 (regenerated from the seed, not saved)
     ecoCount: 0,
     events: createEventRing(),
     monoliths: new Float32Array(8 * 4),   // x, z, placedAt, active

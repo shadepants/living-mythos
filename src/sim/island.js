@@ -6,7 +6,7 @@ import { fbm, valueNoise, smoothstep } from './noise.js';
 
 // Seeded island: basalt+clay height, rim drains, springs near high ground, initial fertility.
 export function generateIsland(world) {
-  const { elev, mask, fertility, culturalBias } = world;
+  const { elev, mask, fertility, culturalBias, soil } = world;
   const seed = world.seed;
   const rng = new Rng(seed ^ 0x9e3779b9);
   let rimCount = 0;
@@ -30,6 +30,7 @@ export function generateIsland(world) {
 
       const low = Math.min(1, Math.max(0, 0.75 - land * 0.35 + (fbm(nx * 5, nz * 5, seed + 3, 3) - 0.5) * 0.5));
       fertility[i] = mask[i] ? 0 : low;
+      soil[i] = 0.55 + 0.9 * fbm(nx * 3.2 + 9, nz * 3.2 + 4, seed + 7, 3);
       culturalBias[i] = (valueNoise(nx * 2 + 31, nz * 2 + 17, seed + 4) - 0.5) * 0.2;
     }
   }

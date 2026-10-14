@@ -292,7 +292,7 @@ void main() {
     col = vec3(0.36, 0.33, 0.31) * sh; a = 1.0 - smoothstep(0.8, 1.0, lf);
   } else {
     float fl = 0.8 + 0.2 * sin(uTime * 9.0 + vAux * 30.0);
-    col = vec3(1.0, 0.68, 0.28) * 2.6 * fl; a = 0.9 * fade; glowK = 0.25;
+    col = vec3(1.0, 0.58, 0.20) * 1.5 * fl; a = 0.75 * fade; glowK = 0.35;
   }
   gl_FragColor = vec4(col * a, a * glowK);
 }

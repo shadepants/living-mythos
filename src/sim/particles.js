@@ -42,9 +42,9 @@ export function stepParticles(p, world, dt, time, rainAmt, windAmp, cloudOn, cx,
     } else if (t === EV_DUST) {
       for (let n = 0; n < 4; n++) spawn(p, P_EMBER, ex + (Math.random() - 0.5) * 0.3, ey + 0.05, ez + (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.25, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.25, 1.6, 0.07 + Math.random() * 0.05, 1);
     } else if (t === EV_LANTERN) {
-      spawn(p, P_LANTERN, ex, ey + 0.4, ez, (Math.random() - 0.5) * 0.1, 0.35 + Math.random() * 0.15, (Math.random() - 0.5) * 0.1, 14 + Math.random() * 6, 0.16, Math.random());
+      spawn(p, P_LANTERN, ex, ey + 0.4, ez, (Math.random() - 0.5) * 0.1, 0.35 + Math.random() * 0.15, (Math.random() - 0.5) * 0.1, 14 + Math.random() * 6, 0.1, Math.random());
     } else if (t === EV_MONOLITH_PULSE || t === EV_MONOLITH_PLACE) {
-      for (let n = 0; n < 3; n++) { const a = n * 2.09 + time; spawn(p, P_LANTERN, ex + Math.cos(a) * 0.5, ey + 0.8, ez + Math.sin(a) * 0.5, 0, 0.45, 0, 11, 0.12, Math.random()); }
+      for (let n = 0; n < 3; n++) { const a = n * 2.09 + time; spawn(p, P_LANTERN, ex + Math.cos(a) * 0.5, ey + 0.8, ez + Math.sin(a) * 0.5, 0, 0.45, 0, 11, 0.08, Math.random()); }
     } else if (t === EV_RAIN_DROP) {
       void ea;
     }

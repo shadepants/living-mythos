@@ -33,6 +33,7 @@ const canvas = document.getElementById('stage');
 const fallback = document.getElementById('fallback');
 const query = new URLSearchParams(location.search);
 const DEBUG = query.has('debug');
+const NORENDER = DEBUG && query.has('norender');   // test aid: run the whole loop but skip the GL draw
 
 function fail(msg) {
   fallback.textContent = msg;
@@ -82,7 +83,7 @@ function boot() {
   const atmoQuery = query.get('atmo');
 
   const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 140);
-  camera.position.set(0, 15, 25);
+  camera.position.set(0, 8.5, 28);
 
   const hemi = new THREE.HemisphereLight(0x8f86c8, 0x5a4236, 1.1);
   scene.add(hemi);
@@ -115,7 +116,7 @@ function boot() {
   const ringFx = createRingFx(world);
 
   const controls = new OrbitControls(camera, canvas);
-  controls.target.set(0, 0, 0);
+  controls.target.set(0, 0.5, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.minDistance = 9;
@@ -127,7 +128,7 @@ function boot() {
   // --- input + dock ---
   const dock = createDock(document.getElementById('ui'), {
     onTool: (i) => { ctl.setTool(i); },
-    onAtmo: (v) => { atmo.setTarget(v); syncAtmoUi(); },
+    onAtmo: (v) => { atmo.setTarget(v); syncAtmoUi(); if (v === 0.5) dock.showHint('Orbit the camera low to see the aurora and the stars', 5000); },
     onDrift: () => { atmo.pinned = false; atmo.drift = true; syncAtmoUi(); },
   });
   const ctl = createController({
@@ -202,7 +203,7 @@ function boot() {
 
   const ATMO_KEYS = { KeyQ: 0, KeyW: 0.5, KeyE: 1 };
   window.addEventListener('keydown', (ev) => {
-    if (ev.code in ATMO_KEYS) { atmo.setTarget(ATMO_KEYS[ev.code]); syncAtmoUi(); }
+    if (ev.code in ATMO_KEYS) { atmo.setTarget(ATMO_KEYS[ev.code]); syncAtmoUi(); if (ev.code === 'KeyW') dock.showHint('Orbit the camera low to see the aurora and the stars', 5000); }
     else if (ev.code === 'KeyM') { audio.setMuted(!audio.muted); muteUi.set(audio.muted); }
     else if (ev.code === 'KeyP') takePhoto();
     else if (ev.code === 'KeyD') { atmo.pinned = false; atmo.drift = true; syncAtmoUi(); }
@@ -319,7 +320,7 @@ function boot() {
     world.params.evapMul = 1 - 0.6 * SHARED.uRain.value;
     world.params.ecoGrow = 1.3 - 0.6 * SHARED.uAurora.value - 0.3 * SHARED.uRain.value;
     post.material.uniforms.uFocusDist.value = camera.position.distanceTo(controls.target);
-    renderFrame();
+    if (!NORENDER) renderFrame();
     if (photo.pending) { photo.pending = false; canvas.toBlob(finishPhoto, 'image/png'); }
     frame++;
     if (debugUi) {
@@ -339,6 +340,7 @@ function boot() {
     const pv = new THREE.Vector3();
     window.__mythos = {
       world, ctl, atmo, camera, controls, flora, particles, structures, villagers, audio, director, photo, gov, save, takePhoto, restored,
+      snapshot() { renderFrame(); return canvas.toDataURL('image/png'); },
       project(x, y, z) {
         pv.set(x, y, z).project(camera);
         const r = canvas.getBoundingClientRect();

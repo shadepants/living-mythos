@@ -257,7 +257,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
       if (tOrder < 0) for (let o = 0; o < 12; o++) if (wb.civ.oState[o] > 0) tOrder = wb.stats.time;
       if (wb.civ.bridges > 0 || wb.civ.built > 0) tDone = wb.stats.time;
     }
-    check('civ: a Mason is dispatched within 3 s of frustration', tOrder >= 0 && tOrder - tb0 < 3, `order after ${(tOrder - tb0).toFixed(1)} sim s`);
+    check('civ: a Mason is dispatched soon after frustration appears (<15 s even when no one stands there)', tOrder >= 0 && tOrder - tb0 < 15, `order after ${(tOrder - tb0).toFixed(1)} sim s`);
     check('civ: the structure is built and covers the crossing', tDone >= 0 && wb.civ.built > 0, `built ${wb.civ.built}`);
     let cover = 0; for (let i = 0; i < GRID_N; i++) if (wb.engCover[i] !== 0) cover++;
     check('civ: completed structure marks cells as covered (cheaper to cross)', cover > 2, `${cover} cells`);

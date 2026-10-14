@@ -1,6 +1,6 @@
-// Headless smoke test: serves dist/, loads it in chrome-headless-shell and collects console/page errors.
-// NOTE: in this PRoot the SwiftShader GPU process segfaults ~1s after the first draw, so there are no
-// screenshots; but shader compile/link errors and JS exceptions surface before that, which is what this checks.
+// Headless smoke test: serves dist/, loads it in chrome-headless-shell on Mesa llvmpipe and collects console/page errors.
+// Waits for the app's "programs compiled: N" message (llvmpipe needs a few seconds to compile every shader), then runs
+// --secs more seconds. Shader compile/link errors and JS exceptions fail the run.
 // Usage: node tools/smoke.mjs [--secs 4] [--query "debug=1"] [--eval "js"] [--file dist/index.html]
 import http from 'node:http';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -8,6 +8,9 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import puppeteer from 'puppeteer-core';
+
+// Mesa llvmpipe is the software GL that stays alive in this PRoot (SwiftShader segfaults within ~1 s).
+process.env.LIBGL_ALWAYS_SOFTWARE = '1'; process.env.GALLIUM_DRIVER = 'llvmpipe';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (n, d) => { const i = process.argv.indexOf('--' + n); return i > 0 ? process.argv[i + 1] : d; };
@@ -34,7 +37,7 @@ const extra = (process.env.CHROME_FLAGS || '').split(' ').filter(Boolean);
 async function attempt() {
   const browser = await puppeteer.launch({
     executablePath: exe, headless: 'shell', dumpio: !!process.env.DUMPIO,
-    args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader',
+    args: ['--no-sandbox', '--use-gl=angle', '--use-angle=gl-egl', '--ignore-gpu-blocklist', '--disable-frame-rate-limit', '--disable-gpu-vsync',
       '--ignore-gpu-blocklist', '--enable-webgl', '--autoplay-policy=no-user-gesture-required', `--window-size=${width},${height}`, ...extra],
   });
   const page = await browser.newPage();
@@ -50,6 +53,7 @@ async function attempt() {
   });
   page.on('pageerror', e => { console.log('[pageerror]', e.message); errors.push(e.message); });
   await page.goto(`http://localhost:${port}/?${query}`, { waitUntil: 'load', timeout: 60000 });
+  for (let t = 0; t < 240 && programs < 0; t++) await new Promise(r => setTimeout(r, 250));
   await new Promise(r => setTimeout(r, secs * 1000));
   let ev;
   if (evalJs) ev = await page.evaluate(evalJs).catch(e => 'eval failed: ' + e.message);
