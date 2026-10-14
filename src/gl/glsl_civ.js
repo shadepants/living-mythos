@@ -9,6 +9,8 @@ varying vec3 vSGlow;
 varying float vDecay;
 varying float vPid;
 varying vec3 vLocalP;
+varying vec3 vLocalN;
+varying float vSeed;
 uniform float uNight;
 bool isPid(float pid, float id) { return abs(pid - id) < 0.5; }
 float partVis(float pid, float kind, float wP, float wI, float wM) {
@@ -22,7 +24,8 @@ float partVis(float pid, float kind, float wP, float wI, float wM) {
   if (kind < 1.5) return (isPid(pid, 8.0) || isPid(pid, 17.0) || isPid(pid, 18.0) || isPid(pid, 19.0)) ? 1.0 : 0.0;
   if (kind < 2.5) return (isPid(pid, 6.0) || isPid(pid, 9.0) || isPid(pid, 20.0) || isPid(pid, 22.0)) ? 1.0 : 0.0;
   if (kind < 3.5) return isPid(pid, 7.0) ? 1.0 : 0.0;
-  return (isPid(pid, 16.0) || isPid(pid, 21.0)) ? 1.0 : 0.0;
+  if (kind < 4.5) return (isPid(pid, 16.0) || isPid(pid, 21.0)) ? 1.0 : 0.0;
+  return (isPid(pid, 23.0) || isPid(pid, 24.0)) ? 1.0 : 0.0;
 }
 vec3 partColor(float pid, float hv) {
   if (isPid(pid, 0.0)) return lin(vec3(0.46, 0.44, 0.42));
@@ -45,6 +48,8 @@ vec3 partColor(float pid, float hv) {
   if (isPid(pid, 20.0)) return lin(vec3(0.50, 0.48, 0.45));
   if (isPid(pid, 7.0)) return lin(vec3(0.52, 0.49, 0.45) * (0.85 + 0.3 * hv));
   if (isPid(pid, 16.0)) return lin(vec3(0.50, 0.47, 0.42) * (0.8 + 0.4 * hv));
+  if (isPid(pid, 23.0)) return lin(vec3(0.30, 0.29, 0.32) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 24.0)) return lin(vec3(0.40, 0.38, 0.38));
   return lin(vec3(0.18, 0.16, 0.15));
 }
 `;
@@ -108,8 +113,10 @@ export const GLSL_STRUCT_POS = /* glsl */`
   }
   vec3 transformed = lp + vec3(0.0, sElev, 0.0);
   vLocalP = position;
+  vLocalN = normal;
+  vSeed = aKind.z;
   vPid = pid;
-  vDecay = kind < 0.5 ? decay : 0.0;
+  vDecay = (kind < 0.5 || kind > 4.5) ? decay : 0.0;
 
   vec3 scol = partColor(pid, hv);
   vec3 sgl = vec3(0.0);
@@ -132,6 +139,8 @@ varying vec3 vSGlow;
 varying float vDecay;
 varying float vPid;
 varying vec3 vLocalP;
+varying vec3 vLocalN;
+varying float vSeed;
 uniform float uNight;
 `;
 
@@ -145,11 +154,28 @@ export const GLSL_STRUCT_FRAG_COLOR = /* glsl */`
   if (abs(vPid - 1.0) < 0.5) winS = step(abs(fract(vLocalP.x * 7.0 + 0.5) - 0.5), 0.16) * step(abs(vLocalP.y - 0.2), 0.05) * step(0.4, abs(nrmS.z) + abs(nrmS.x));
   else if (abs(vPid - 11.0) < 0.5) winS = step(abs(fract(vLocalP.x * 5.0 + 0.5) - 0.5), 0.08) * step(abs(fract(vLocalP.y * 10.0) - 0.5), 0.12) * 0.5;
   float winGlow = winS * (1.0 - vDecay);
+
+  // carved myth glyph: ring, optional inner ring, spokes and a core, seeded per myth
+  vec3 glyphGlow = vec3(0.0);
+  if (abs(vPid - 23.0) < 0.5) {
+    vec2 gq = (vLocalP.xy - vec2(0.0, 0.30)) / 0.10;
+    float gr = length(gq);
+    float ga = atan(gq.y, gq.x);
+    float nSp = floor(3.0 + vSeed * 5.0);
+    float ring1 = smoothstep(0.09, 0.0, abs(gr - 0.9));
+    float ring2 = smoothstep(0.09, 0.0, abs(gr - 0.45)) * step(0.5, fract(vSeed * 7.0));
+    float spokes = smoothstep(0.14, 0.0, abs(sin(ga * nSp))) * step(0.45, gr) * step(gr, 0.95);
+    float core = smoothstep(0.22, 0.12, gr);
+    float glyph = clamp(ring1 + ring2 + spokes * 0.8 + core, 0.0, 1.0) * step(abs(gq.x), 1.15) * step(abs(gq.y), 1.5) * step(0.5, vLocalN.z);
+    diffuseColor.rgb *= 1.0 - 0.45 * glyph;
+    vec3 gcol = mix(vec3(1.0, 0.75, 0.30), vec3(0.40, 0.95, 1.0), fract(vSeed * 3.7));
+    glyphGlow = gcol * glyph * (0.7 + uNight * 1.6) * (1.0 - 0.8 * vDecay);
+  }
 `;
 
 export const GLSL_STRUCT_FRAG_EMISSIVE = /* glsl */`
   #include <emissivemap_fragment>
-  totalEmissiveRadiance += vSGlow + vec3(1.0, 0.62, 0.26) * winGlow * (0.12 + uNight * 1.6);
+  totalEmissiveRadiance += vSGlow + glyphGlow + vec3(1.0, 0.62, 0.26) * winGlow * (0.12 + uNight * 1.6);
 `;
 
 // ---------------- villagers ----------------

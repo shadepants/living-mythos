@@ -3,7 +3,7 @@ import { SHARED } from './shared.js';
 import { GLSL_SIM, GLSL_TERRAIN_HEIGHT } from './glsl.js';
 import { GLSL_STRUCT_PARS, GLSL_STRUCT_NORMAL, GLSL_STRUCT_POS, GLSL_STRUCT_FRAG_PARS, GLSL_STRUCT_FRAG_COLOR, GLSL_STRUCT_FRAG_EMISSIVE } from './glsl_civ.js';
 import { kitNew, kitBox, kitFrustum, kitPyramid, kitRoof, kitFinish } from './geomkit.js';
-import { KIND_DWELLING, KIND_MONOLITH, KIND_BRIDGE, KIND_STEPS, KIND_PAVING } from '../sim/civ.js';
+import { KIND_DWELLING, KIND_MONOLITH, KIND_BRIDGE, KIND_STEPS, KIND_PAVING, KIND_MYTH } from '../sim/civ.js';
 import { TUNING } from '../sim/tuning.js';
 
 const GLOW_N = 24;
@@ -83,6 +83,11 @@ export function createStructureGeometry() {
   kitBox(b, 0, 0.18, 0, 0.04, 0.36, 0.04, 21, yn);
   kitBox(b, 0, 0.39, 0, 0.09, 0.09, 0.09, 21, yn);
 
+  // --- Myth stone: carved slab facing the island centre (pid 23 slab, 24 base); the glyph is drawn in the fragment shader
+  kitBox(b, 0, 0.04, 0, 0.34, 0.08, 0.18, 24, yn);
+  kitBox(b, 0, 0.31, 0, 0.26, 0.46, 0.07, 23, yn);
+  kitPyramid(b, 0, 0.54, 0, 0.13, 0.07, 4, 23, yn, 0.785);
+
   return kitFinish(b);
 }
 
@@ -131,7 +136,7 @@ export function createStructures(caps) {
       pv.set(civ.sX[placed], 0, civ.sZ[placed]);
       const k = civ.sKind[placed];
       // local +X is the span / descent direction for engineering; dwellings just use their stored yaw
-      const theta = k === KIND_DWELLING || k === KIND_MONOLITH ? civ.sRot[placed] : Math.atan2(-civ.sDirZ[placed], civ.sDirX[placed]);
+      const theta = k === KIND_DWELLING || k === KIND_MONOLITH || k === KIND_MYTH ? civ.sRot[placed] : Math.atan2(-civ.sDirZ[placed], civ.sDirX[placed]);
       q.setFromAxisAngle(up, theta);
       m.compose(pv, q, sc);
       mesh.setMatrixAt(placed, m);
@@ -141,7 +146,7 @@ export function createStructures(caps) {
     for (let i = 0; i < n; i++) {
       const o = i * 4;
       sa[o] = civ.sBias[i]; sa[o + 1] = civ.sBuild[i]; sa[o + 2] = civ.sDecay[i]; sa[o + 3] = civ.sLum[i];
-      ka[o] = civ.sKind[i]; ka[o + 1] = civ.sLen[i] > 0 ? civ.sLen[i] : 1;
+      ka[o] = civ.sKind[i]; ka[o + 1] = civ.sLen[i] > 0 ? civ.sLen[i] : 1; ka[o + 2] = civ.sKind[i] === KIND_MYTH ? civ.sBias[i] : 0;
     }
     state.needsUpdate = true; kindAttr.needsUpdate = true;
     mesh.userData.dt = dt;
@@ -157,6 +162,7 @@ export function createStructures(caps) {
         const k = civ.sKind[i];
         if ((k === KIND_BRIDGE || k === KIND_PAVING) && civ.sBuild[i] >= 1) gl[g++].set(civ.sX[i], civ.sZ[i], 0.9, 0.9);
       }
+      for (let i = 0; i < n && g < GLOW_N; i++) if (civ.sKind[i] === KIND_MYTH) gl[g++].set(civ.sX[i], civ.sZ[i], 0.7, 0.7 * (1 - 0.7 * civ.sDecay[i]));
       for (let i = 0; i < n && g < GLOW_N; i++) {
         if (civ.sKind[i] === KIND_DWELLING && civ.sBuild[i] >= 1 && civ.sDecay[i] < 0.5) gl[g++].set(civ.sX[i], civ.sZ[i], 0.8, 0.6 + civ.sLum[i]);
       }

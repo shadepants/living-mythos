@@ -10,7 +10,12 @@ export const ROLE_FORAGER = 0, ROLE_HAULER = 1, ROLE_MASON = 2, ROLE_MYSTIC = 3;
 // Villager states
 export const ST_IDLE = 0, ST_WALK = 1, ST_FORAGE = 2, ST_HAUL = 3, ST_BUILD = 4, ST_MIGRATE = 5, ST_PROCESSION = 6, ST_REST = 7, ST_GREET = 8, ST_CONSECRATE = 9;
 // Structure kinds
-export const KIND_DWELLING = 0, KIND_MONOLITH = 1, KIND_BRIDGE = 2, KIND_STEPS = 3, KIND_PAVING = 4;
+export const KIND_DWELLING = 0, KIND_MONOLITH = 1, KIND_BRIDGE = 2, KIND_STEPS = 3, KIND_PAVING = 4, KIND_MYTH = 5;
+export const ST_GATHER = 10;
+// Myth kinds (spec 1.2)
+export const MYTH_BRIDGE = 1, MYTH_REVIVE = 2, MYTH_MONOLITH = 3, MYTH_FLOOD = 4, MYTH_STEPS = 5, MYTH_LANTERNS = 6;
+export const MYTH_MAX = 12;
+const ANNIVERSARY = 120;      // sim seconds between gatherings at a myth stone
 
 const MAX_ORDERS = 12;
 const HEAD_COS = new Float32Array([1, Math.cos(0.6), Math.cos(-0.6), Math.cos(1.2), Math.cos(-1.2)]);
@@ -30,6 +35,9 @@ export function createCiv() {
     oX: f(MAX_ORDERS), oZ: f(MAX_ORDERS), oDirX: f(MAX_ORDERS), oDirZ: f(MAX_ORDERS), oLen: f(MAX_ORDERS), oProg: f(MAX_ORDERS), oDust: f(MAX_ORDERS),
     oKind: new Uint8Array(MAX_ORDERS), oState: new Uint8Array(MAX_ORDERS), oWorker: new Int32Array(MAX_ORDERS).fill(-1), oStruct: new Int32Array(MAX_ORDERS).fill(-1),
     food: 0, masons: 0, built: 0, bridges: 0, revived: 0, mythFirstBridge: false,
+    monoStruct: new Int32Array(8).fill(-1), monoX: new Float32Array(8), monoZ: new Float32Array(8),
+    nM: 0, mX: f(MYTH_MAX), mZ: f(MYTH_MAX), mT0: f(MYTH_MAX), mSeed: f(MYTH_MAX),
+    mKind: new Uint8Array(MYTH_MAX), mStruct: new Int32Array(MYTH_MAX).fill(-1), mAnniv: new Int32Array(MYTH_MAX), mMotif: new Uint8Array(MYTH_MAX * 4), mythFlags: 0, mythClock: 0,
     orderClock: 0, foundClock: 0, secClock: 0, lanternClock: 0, eventCursor: { i: 0 },
   };
 }
@@ -254,6 +262,10 @@ function arrive(world, v) {
   } else if (st === ST_CONSECRATE) {
     const s = civ.vAux[v];
     if (s >= 0 && civ.sDecay[s] > 0.4) { reviveStructure(world, s); }
+  } else if (st === ST_GATHER) {
+    civ.vTimer[v] = 8;
+    civ.vState[v] = ST_IDLE;
+    return;
   } else if (st === ST_PROCESSION) {
     civ.vTimer[v] = 2.5 + world.rng.next() * 2;
     civ.lanternClock += 0;
@@ -262,10 +274,38 @@ function arrive(world, v) {
   civ.vState[v] = ST_IDLE;
 }
 
+// A notable thing happened here: carve a standing stone with its glyph, keep a 4-note motif for the audio leitmotif.
+export function recordMyth(world, kind, x, z) {
+  const civ = world.civ, rng = world.rng;
+  let slot = civ.nM;
+  if (slot >= MYTH_MAX) {
+    slot = 0;
+    for (let k = 1; k < MYTH_MAX; k++) if (civ.mT0[k] < civ.mT0[slot]) slot = k;
+  } else civ.nM++;
+  // find a dry spot just beside the event for the stone
+  let sx = x + 0.55, sz = z + 0.25;
+  for (let t = 0; t < 12; t++) {
+    const a = rng.next() * 6.283, r = 0.5 + rng.next() * 0.35;
+    const cx = x + Math.cos(a) * r, cz = z + Math.sin(a) * r;
+    if (world.water[cellOf(cx, cz)] < 0.006 && Math.hypot(cx, cz) < 8.3) { sx = cx; sz = cz; break; }
+  }
+  civ.mX[slot] = sx; civ.mZ[slot] = sz; civ.mKind[slot] = kind; civ.mT0[slot] = world.stats.time;
+  civ.mSeed[slot] = rng.next(); civ.mAnniv[slot] = 0;
+  for (let j = 0; j < 4; j++) civ.mMotif[slot * 4 + j] = (kind * 2 + ((rng.next() * 5) | 0) + j * 2) % 7;
+  const dirYaw = Math.atan2(-sx, -sz);   // the stone faces the island's centre
+  let st = civ.mStruct[slot];
+  if (st < 0) st = addStructure(civ, KIND_MYTH, sx, sz, civ.mSeed[slot], 1, Math.sin(dirYaw), Math.cos(dirYaw), 1);
+  else { civ.sX[st] = sx; civ.sZ[st] = sz; civ.sBias[st] = civ.mSeed[slot]; civ.sDecay[st] = 0; }
+  if (st >= 0) { civ.mStruct[slot] = st; civ.sRot[st] = dirYaw; civ.sDirX[st] = Math.sin(dirYaw); civ.sDirZ[st] = Math.cos(dirYaw); civ.sLen[st] = 1; }
+  emitEvent(world.events, EV_MYTH, sx, sz, slot);
+  return slot;
+}
+
 export function reviveStructure(world, s) {
   const civ = world.civ;
   civ.sDecay[s] = 0; civ.sLum[s] = 1; civ.revived++;
   emitEvent(world.events, EV_REVIVE, civ.sX[s], civ.sZ[s], 1);
+  if ((civ.mythFlags & 2) === 0) { civ.mythFlags |= 2; recordMyth(world, MYTH_REVIVE, civ.sX[s], civ.sZ[s]); }
 }
 
 function moveVillager(world, v, dt) {
@@ -423,7 +463,8 @@ function completeOrder(world, o) {
   markCoverFor(world, civ.oX[o], civ.oZ[o], civ.oDirX[o], civ.oDirZ[o], kind === KIND_PAVING ? 0.5 : civ.oLen[o], radius, kind);
   civ.built++; if (kind === KIND_BRIDGE) civ.bridges++;
   emitEvent(world.events, EV_BUILD_DONE, civ.oX[o], civ.oZ[o], kind);
-  if (kind === KIND_BRIDGE && !civ.mythFirstBridge) { civ.mythFirstBridge = true; emitEvent(world.events, EV_MYTH, civ.oX[o], civ.oZ[o], 1); }
+  if (kind === KIND_BRIDGE && (civ.mythFlags & 1) === 0) { civ.mythFlags |= 1; civ.mythFirstBridge = true; recordMyth(world, MYTH_BRIDGE, civ.oX[o], civ.oZ[o]); }
+  if (kind === KIND_STEPS && (civ.mythFlags & 16) === 0) { civ.mythFlags |= 16; recordMyth(world, MYTH_STEPS, civ.oX[o], civ.oZ[o]); }
   const w = civ.oWorker[o];
   civ.vJob[w] = -1; civ.vTimer[w] = 0.3; civ.vState[w] = ST_IDLE;
   civ.oState[o] = 0; civ.oWorker[o] = -1; civ.oStruct[o] = -1;
@@ -472,6 +513,35 @@ function secondTick(world) {
     if (k === KIND_BRIDGE || k === KIND_STEPS || k === KIND_PAVING) nudgeBias(world, civ.sX[s], civ.sZ[s], 2.0, -1, 0.05);
     else if (k === KIND_DWELLING && civ.sBuild[s] >= 1 && civ.sDecay[s] < 0.5) nudgeBias(world, civ.sX[s], civ.sZ[s], 1.6, 0, 0.02);
   }
+  for (let k = 0; k < civ.nM; k++) if (civ.mStruct[k] >= 0) civ.sDecay[civ.mStruct[k]] = Math.min(1, (world.stats.time - civ.mT0[k]) / 900);
+  // first monolith, floods, and anniversaries at myth stones
+  if ((civ.mythFlags & 4) === 0) {
+    for (let k = 0; k < 8; k++) if (m[k * 4 + 3] !== 0) { civ.mythFlags |= 4; recordMyth(world, MYTH_MONOLITH, m[k * 4], m[k * 4 + 1]); break; }
+  }
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1 || civ.sDecay[s] > 0.9) continue;
+    if (world.water[cellOf(civ.sX[s], civ.sZ[s])] > 0.035 && world.stats.time - civ.mythClock > 90) {
+      civ.mythClock = world.stats.time;
+      civ.sDecay[s] = Math.min(1, civ.sDecay[s] + 0.5);
+      recordMyth(world, MYTH_FLOOD, civ.sX[s], civ.sZ[s]);
+    }
+  }
+  for (let k = 0; k < civ.nM; k++) {
+    const n = Math.floor((world.stats.time - civ.mT0[k]) / ANNIVERSARY);
+    if (n > civ.mAnniv[k]) {
+      civ.mAnniv[k] = n;
+      emitEvent(world.events, EV_MYTH, civ.mX[k], civ.mZ[k], 100 + k);
+      let called = 0;
+      for (let v = 0; v < civ.nV && called < 10; v++) {
+        if (civ.vJob[v] >= 0 || civ.vState[v] === ST_BUILD) continue;
+        const dx = civ.vX[v] - civ.mX[k], dz = civ.vZ[v] - civ.mZ[k];
+        if (dx * dx + dz * dz > 6 * 6) continue;
+        const a = world.rng.next() * 6.283, r = 0.35 + world.rng.next() * 0.35;
+        civ.vState[v] = ST_GATHER; civ.vTX[v] = civ.mX[k] + Math.cos(a) * r; civ.vTZ[v] = civ.mZ[k] + Math.sin(a) * r; civ.vTimer[v] = 99;
+        called++;
+      }
+    }
+  }
   // growth: spend stored food on a new dwelling in fertile ground near the busiest part of the settlement
   if (civ.food >= TUNING.foodPerDwelling && civ.dwellings < TUNING.dwellingCap) {
     const rng = world.rng;
@@ -513,6 +583,7 @@ function readEvents(world) {
   const civ = world.civ;
   let k;
   while ((k = nextEvent(world.events, civ.eventCursor)) >= 0) {
+    if (world.events.type[k] === EV_LANTERN && (civ.mythFlags & 32) === 0) { civ.mythFlags |= 32; recordMyth(world, MYTH_LANTERNS, world.events.x[k], world.events.z[k]); continue; }
     if (world.events.type[k] !== EV_CHIME) continue;
     const cx = world.events.x[k], cz = world.events.z[k];
     let greeted = 0;
@@ -528,8 +599,28 @@ function readEvents(world) {
   }
 }
 
+// Mirror the player's monoliths into the structure pool (they rise over 1.5 s; a recycled slot rises again elsewhere).
+function syncMonoliths(world, dt) {
+  const civ = world.civ, m = world.monoliths;
+  for (let k = 0; k < 8; k++) {
+    if (m[k * 4 + 3] === 0) continue;
+    let s = civ.monoStruct[k];
+    if (s < 0) {
+      s = addStructure(civ, KIND_MONOLITH, m[k * 4], m[k * 4 + 1], 1, 0, 0, 1, 1);
+      if (s < 0) continue;
+      civ.sRot[s] = world.rng.next() * 6.283;
+      civ.monoStruct[k] = s; civ.monoX[k] = m[k * 4]; civ.monoZ[k] = m[k * 4 + 1];
+    } else if (civ.monoX[k] !== m[k * 4] || civ.monoZ[k] !== m[k * 4 + 1]) {
+      civ.sX[s] = m[k * 4]; civ.sZ[s] = m[k * 4 + 1]; civ.sBuild[s] = 0;
+      civ.monoX[k] = m[k * 4]; civ.monoZ[k] = m[k * 4 + 1];
+    }
+    if (civ.sBuild[s] < 1) civ.sBuild[s] = Math.min(1, civ.sBuild[s] + dt / 1.5);
+  }
+}
+
 export function civStep(world, dt) {
   const civ = world.civ;
+  syncMonoliths(world, dt);
   if (civ.dwellings === 0) return;
   readEvents(world);
   for (let v = 0; v < civ.nV; v++) {

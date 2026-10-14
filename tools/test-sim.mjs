@@ -8,7 +8,7 @@ import { prewarm } from '../src/sim/prewarm.js';
 import { Rng } from '../src/sim/rng.js';
 import { createParticles, stepParticles, breezeLanterns, PARTICLE_CAP, P_ROCK, P_LANTERN, P_RAIN, P_SPRAY, P_EMBER } from '../src/sim/particles.js';
 import { emitEvent, EV_ROCKFALL, EV_DUST, EV_LANTERN } from '../src/sim/events.js';
-import { seedCivilization, civStep, KIND_BRIDGE, KIND_DWELLING, ROLE_MYSTIC, ST_BUILD } from '../src/sim/civ.js';
+import { seedCivilization, civStep, KIND_BRIDGE, KIND_DWELLING, KIND_MYTH, ROLE_MYSTIC, ST_BUILD, recordMyth, MYTH_FLOOD, MYTH_MAX } from '../src/sim/civ.js';
 import { sculptAt, rainAt, placeMonolith, monolithEffects, MAX_MONOLITHS } from '../src/sim/tools.js';
 import { sampleGrid, visualHeight, raymarchHeightfield } from '../src/sim/sample.js';
 import { nextEvent, EV_MONOLITH_PLACE, EV_MONOLITH_PULSE } from '../src/sim/events.js';
@@ -307,6 +307,52 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   for (let v = 0; v < 120; v++) if (wm.civ.vRole[v] === ROLE_MYSTIC && Math.hypot(wm.civ.vX[v] - 1, wm.civ.vZ[v] - 1) < 2.0) near++;
   let kk; while ((kk = nextEvent(wm.events, cur)) >= 0) if (wm.events.type[kk] === 6) lanterns++;
   check('civ: mystics gather at a monolith and launch sky-lanterns', near >= 6 && lanterns >= 2, `${near} mystics nearby, ${lanterns} lanterns`);
+}
+
+// 5e1. monoliths appear in the structure pool
+{
+  const w = createWorld(1337); prewarm(w); seedCivilization(w);
+  const n0 = w.civ.nS;
+  placeMonolith(w, 2, 2);
+  for (let i = 0; i < 60; i++) civStep(w, 0.05);
+  const s = w.civ.monoStruct[0];
+  check('monolith: placing one adds an obelisk to the structure pool that rises fully', s >= 0 && w.civ.sKind[s] === 1 && w.civ.nS >= n0 + 1 && w.civ.sBuild[s] === 1, `struct ${s}`);
+  for (let k = 0; k < 9; k++) { w.stats.time += 1; placeMonolith(w, -5 + k, -3); }
+  for (let i = 0; i < 60; i++) civStep(w, 0.05);
+  let obelisks = 0; for (let i = 0; i < w.civ.nS; i++) if (w.civ.sKind[i] === 1) obelisks++;
+  check('monolith: recycling reuses structures (never more than 8 obelisks)', obelisks === 8, `${obelisks}`);
+}
+
+// 5e2. myths
+{
+  const mk = (seed) => { const w = createWorld(seed); prewarm(w); seedCivilization(w); return w; };
+  const w = mk(1337);
+  check('myths: none exist at boot', w.civ.nM === 0);
+  // first bridge writes a myth and a standing stone
+  let river = -1;
+  for (let i = 0; i < GRID_N; i++) { const x = i % 128, zz = (i / 128) | 0; if (x > 20 && x < 108 && zz > 20 && zz < 108 && w.water[i] > 0.04 && w.mask[i] === 0 && Math.hypot(w.vx[i], w.vz[i]) > 0.3) { river = i; break; } }
+  const mcur = { i: w.events.head };
+  for (let i = 0; i < 40 * 25 && w.civ.nM === 0; i++) { w.frustration[river] = Math.max(w.frustration[river], w.civ.built === 0 ? 0.9 : 0); simStep(w); }
+  check('myths: the first bridge becomes a myth with a carved stone', w.civ.nM >= 1 && w.civ.mKind[0] === 1 && w.civ.sKind[w.civ.mStruct[0]] === KIND_MYTH, `nM ${w.civ.nM}`);
+  let mythEv = 0, kq; while ((kq = nextEvent(w.events, mcur)) >= 0) if (w.events.type[kq] === 9) mythEv++;
+  check('myths: a myth event is emitted for audio and visuals', mythEv >= 1, `${mythEv}`);
+  check('myths: every myth carries a 4-note motif in the scale', (() => { for (let j = 0; j < 4; j++) if (w.civ.mMotif[j] > 6) return false; return true; })());
+  // many myths recycle the oldest stone
+  const nsBefore = w.civ.nS;
+  for (let k = 0; k < MYTH_MAX + 4; k++) { w.stats.time += 1; recordMyth(w, MYTH_FLOOD, -3 + (k % 5), 2 + (k % 3)); }
+  check('myths: capped at 12, oldest recycled without growing the structure pool unboundedly', w.civ.nM === MYTH_MAX && w.civ.nS - nsBefore <= MYTH_MAX, `nM ${w.civ.nM}, +${w.civ.nS - nsBefore} structures`);
+  // anniversary: villagers gather and pause at the stone
+  const wa = mk(1337);
+  wa.civ.mythFlags = 63;                               // suppress the first-time myths so only ours exists
+  recordMyth(wa, 2, 0.5, 0.5);
+  const sx = wa.civ.mX[0], sz = wa.civ.mZ[0];
+  for (let v = 0; v < 120; v++) { wa.civ.vX[v] = sx + ((v * 7) % 13 - 6) * 0.25; wa.civ.vZ[v] = sz + ((v * 5) % 11 - 5) * 0.25; }
+  let maxNear = 0;
+  for (let i = 0; i < 40 * 135; i++) {
+    simStep(wa);
+    if (wa.stats.time - wa.civ.mT0[0] > 121 && i % 20 === 0) { let n = 0; for (let v = 0; v < 120; v++) if (Math.hypot(wa.civ.vX[v] - sx, wa.civ.vZ[v] - sz) < 1.0) n++; maxNear = Math.max(maxNear, n); }
+  }
+  check('myths: villagers gather at the stone on the anniversary', maxNear >= 6, `${maxNear} villagers within 1.0`);
 }
 
 // 5f. particles
