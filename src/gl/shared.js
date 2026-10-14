@@ -23,6 +23,7 @@ export const SHARED = {
   uCursor: { value: new THREE.Vector4(0, 0, 0, 1.5) },   // x, y, z, radius
   uCursorCol: { value: new THREE.Color(1.0, 0.8, 0.4) },
   uCursorA: { value: 0 },
+  uGlow: { value: Array.from({ length: 24 }, () => new THREE.Vector4(0, 0, 1, 0)) },   // x, z, radius, intensity (warm light pools)
   uCloud: { value: new THREE.Vector4(0, 0, 3, 0) },    // x, z, radius, strength (raincloud tool)
   uBreeze: { value: new THREE.Vector4(0, 0, 2.5, 0) }, // x, z, radius, strength (breeze tool)
 };

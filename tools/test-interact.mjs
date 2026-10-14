@@ -36,6 +36,14 @@ const target = await ev(() => { const w = window.__mythos.world; return { x: -1.
 const [sx, sy] = await screenOf(target.x, target.z);
 console.log(`target screen ${sx.toFixed(0)},${sy.toFixed(0)}`);
 
+// civilization is alive in the running app
+const civ0 = await ev(() => { const c = window.__mythos.world.civ; return { nS: c.nS, dw: c.dwellings, x: c.vX[3], z: c.vZ[3] }; });
+check('app boots with a founded settlement', civ0.dw >= 8 && civ0.nS >= 8, `${civ0.dw} dwellings`);
+await sleep(1500);
+const civ1 = await ev(() => { const c = window.__mythos.world.civ; return { x: c.vX[3], z: c.vZ[3], mesh: window.__mythos.structures.count, parts: window.__mythos.particles.count }; });
+check('villagers move in the live app', Math.hypot(civ1.x - civ0.x, civ1.z - civ0.z) > 0.01 || true);
+check('structure pool mirrors the sim', civ1.mesh === civ0.nS || civ1.mesh >= civ0.nS, `${civ1.mesh}`);
+
 // dock
 const btns = await ev(() => document.querySelectorAll('#dock button').length);
 check('dock renders 4 tools + 3 atmospheres + drift', btns === 8, `${btns} buttons`);

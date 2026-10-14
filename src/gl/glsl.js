@@ -122,6 +122,17 @@ export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
       ringGlow += rc * (band + band2) * fade * rB.x;
     }
   }
+  // warm light pools around hearths, lamps and monoliths after dark
+  float pool = 0.0;
+  for (int k = 0; k < 24; k++) {
+    vec4 gP = uGlow[k];
+    if (gP.w > 0.0) {
+      vec2 gd = (vWP.xz - gP.xy) / gP.z;
+      float gf = 1.0 / (1.0 + dot(gd, gd));
+      pool += gP.w * gf * gf;
+    }
+  }
+  ringGlow += col * vec3(1.0, 0.62, 0.28) * pool * uNight * 1.8;
 `;
 
 export const GLSL_ISLAND_FRAG_EMISSIVE = /* glsl */`

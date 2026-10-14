@@ -6,6 +6,8 @@ import { simStep } from '../src/sim/sim.js';
 import { ecologyStep } from '../src/sim/ecology.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { Rng } from '../src/sim/rng.js';
+import { createParticles, stepParticles, breezeLanterns, PARTICLE_CAP, P_ROCK, P_LANTERN, P_RAIN, P_SPRAY, P_EMBER } from '../src/sim/particles.js';
+import { emitEvent, EV_ROCKFALL, EV_DUST, EV_LANTERN } from '../src/sim/events.js';
 import { seedCivilization, civStep, KIND_BRIDGE, KIND_DWELLING, ROLE_MYSTIC, ST_BUILD } from '../src/sim/civ.js';
 import { sculptAt, rainAt, placeMonolith, monolithEffects, MAX_MONOLITHS } from '../src/sim/tools.js';
 import { sampleGrid, visualHeight, raymarchHeightfield } from '../src/sim/sample.js';
@@ -305,6 +307,48 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   for (let v = 0; v < 120; v++) if (wm.civ.vRole[v] === ROLE_MYSTIC && Math.hypot(wm.civ.vX[v] - 1, wm.civ.vZ[v] - 1) < 2.0) near++;
   let kk; while ((kk = nextEvent(wm.events, cur)) >= 0) if (wm.events.type[kk] === 6) lanterns++;
   check('civ: mystics gather at a monolith and launch sky-lanterns', near >= 6 && lanterns >= 2, `${near} mystics nearby, ${lanterns} lanterns`);
+}
+
+// 5f. particles
+{
+  const w = createWorld(1337); prewarm(w); seedCivilization(w);
+  const p = createParticles(); p.cursor.i = w.events.head;
+  const countType = (t) => { let n = 0; for (let i = 0; i < PARTICLE_CAP; i++) if (p.alive[i] && p.type[i] === t) n++; return n; };
+  emitEvent(w.events, EV_ROCKFALL, 0, 0, 1);
+  emitEvent(w.events, EV_DUST, 1, 1, 1);
+  emitEvent(w.events, EV_LANTERN, -1, 1, 1);
+  stepParticles(p, w, 0.016, 0, 0, 0.3, false, 0, 0, 0, 0, 0);
+  check('particles: events spawn rockfall, dust and a sky-lantern', countType(P_ROCK) >= 3 && countType(P_EMBER) >= 3 && countType(P_LANTERN) >= 1, `rock ${countType(P_ROCK)} dust/ember ${countType(P_EMBER)} lantern ${countType(P_LANTERN)}`);
+  // lanterns rise, rocks fall and come to rest on the ground
+  const li = (() => { for (let i = 0; i < PARTICLE_CAP; i++) if (p.alive[i] && p.type[i] === P_LANTERN) return i; return -1; })();
+  const ly0 = p.y[li];
+  for (let t = 0; t < 120; t++) stepParticles(p, w, 0.016, t * 0.016, 0, 0.3, false, 0, 0, 0, 0, 0);
+  check('particles: sky-lanterns drift upward', p.y[li] > ly0 + 0.4, `${ly0.toFixed(2)} -> ${p.y[li].toFixed(2)}`);
+  let underground = 0;
+  for (let i = 0; i < PARTICLE_CAP; i++) if (p.alive[i] && p.type[i] === P_ROCK && p.y[i] < -1) underground++;
+  check('particles: rockfall debris does not fall through the island', underground === 0);
+  // monsoon rain respects its budget and lands
+  for (let t = 0; t < 400; t++) stepParticles(p, w, 0.016, t * 0.016, 1, 1.4, false, 0, 0, 0, 0, 0);
+  const rain = countType(P_RAIN);
+  check('particles: monsoon rain fills but does not exceed its budget', rain > 80 && rain <= p.rainSlots, `${rain} streaks`);
+  // total never exceeds the pool and sim stays finite
+  let ok = true; for (let i = 0; i < PARTICLE_CAP; i++) if (p.alive[i] && !(Number.isFinite(p.x[i]) && Number.isFinite(p.y[i]) && Number.isFinite(p.z[i]))) ok = false;
+  check('particles: all alive particles stay finite', ok);
+  // breeze accelerates lanterns
+  emitEvent(w.events, EV_LANTERN, 0, 0, 1);
+  stepParticles(p, w, 0.016, 0, 0, 0.3, false, 0, 0, 0, 0, 0);
+  const lj = (() => { for (let i = PARTICLE_CAP - 1; i >= 0; i--) if (p.alive[i] && p.type[i] === P_LANTERN) return i; return -1; })();
+  const bx0 = p.x[lj];
+  for (let t = 0; t < 60; t++) breezeLanterns(p, bx0 - 0.5, p.z[lj], 2, 1, 0.016);
+  check('particles: the breeze pushes nearby sky-lanterns', Math.abs(p.x[lj] - bx0) > 0.3, `${(p.x[lj] - bx0).toFixed(2)}`);
+  // zero-GC
+  global.gc();
+  const h0 = process.memoryUsage().heapUsed;
+  for (let t = 0; t < 1500; t++) stepParticles(p, w, 0.016, t * 0.016, 0.6, 0.8, false, 0, 0, 0, 0, 0);
+  global.gc();
+  const grew = process.memoryUsage().heapUsed - h0;
+  check('zero-GC: stepParticles does not grow the heap', grew < 256 * 1024, `${(grew / 1024).toFixed(1)} KB`);
+  void P_SPRAY;
 }
 
 // 6. prewarm produces a believable island

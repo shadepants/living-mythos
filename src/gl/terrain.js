@@ -46,6 +46,8 @@ function addSimUniforms(shader) {
   shader.uniforms.uWet = SHARED.uWet;
   shader.uniforms.uRingA = SHARED.uRingA;
   shader.uniforms.uRingB = SHARED.uRingB;
+  shader.uniforms.uGlow = SHARED.uGlow;
+  shader.uniforms.uNight = SHARED.uNight;
 }
 
 export function createIslandTop(grid, caps) {
@@ -58,7 +60,7 @@ export function createIslandTop(grid, caps) {
       .replace('#include <beginnormal_vertex>', GLSL_ISLAND_VERT_NORMAL)
       .replace('#include <begin_vertex>', GLSL_ISLAND_VERT_POS);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec2 vSimUv;\nuniform float uWet;\nuniform vec4 uRingA[8];\nuniform vec4 uRingB[8];\n${GLSL_SIM}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec2 vSimUv;\nuniform float uWet;\nuniform vec4 uRingA[8];\nuniform vec4 uRingB[8];\nuniform vec4 uGlow[24];\nuniform float uNight;\n${GLSL_SIM}`)
       .replace('#include <color_fragment>', GLSL_ISLAND_FRAG_COLOR)
       .replace('#include <roughnessmap_fragment>', GLSL_ISLAND_FRAG_ROUGH)
       .replace('#include <emissivemap_fragment>', GLSL_ISLAND_FRAG_EMISSIVE);

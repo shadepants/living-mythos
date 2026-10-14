@@ -9,6 +9,9 @@ import { createRaincloud } from './gl/cloud.js';
 import { createRingFx } from './gl/fxbridge.js';
 import { createDock, TOOL_HINTS } from './ui/dock.js';
 import { createController } from './input/controller.js';
+import { createStructures } from './gl/structures.js';
+import { createVillagers } from './gl/villagers.js';
+import { createParticlePool } from './gl/particlepool.js';
 import { createFlora } from './gl/flora.js';
 import { createSkyDome } from './gl/sky.js';
 import { createAtmosphere } from './gl/atmo.js';
@@ -16,6 +19,8 @@ import { createGridGeometry, createIslandTop, createWaterSurface, createBasaltSk
 import { createWorld } from './sim/world.js';
 import { simStep } from './sim/sim.js';
 import { prewarm } from './sim/prewarm.js';
+import { seedCivilization } from './sim/civ.js';
+import { createParticles, stepParticles, breezeLanterns } from './sim/particles.js';
 import { TUNING } from './sim/tuning.js';
 
 const canvas = document.getElementById('stage');
@@ -37,6 +42,9 @@ function boot() {
   // Simulation first: the pre-warm blocks for a moment, and the GL context should not sit idle behind it.
   const world = createWorld(query.has('seed') ? parseInt(query.get('seed'), 10) : TUNING.seedDefault);
   prewarm(world);
+  seedCivilization(world);
+  const particles = createParticles();
+  particles.cursor.i = world.events.head;
 
   let renderer;
   try {
@@ -85,6 +93,12 @@ function boot() {
   scene.add(createWaterSurface(grid, caps));
   const flora = createFlora(caps, 3500);
   scene.add(flora);
+  const structures = createStructures(caps);
+  scene.add(structures);
+  const villagers = createVillagers(caps);
+  scene.add(villagers);
+  const particlePool = createParticlePool();
+  scene.add(particlePool);
   scene.add(createCursor(caps));
   const cloudFx = createRaincloud();
   scene.add(cloudFx);
@@ -176,6 +190,14 @@ function boot() {
     controls.update();
     ctl.update(dt, SHARED.uTime.value);
     ringFx.update();
+    {
+      const cst = ctl.st;
+      stepParticles(particles, world, dt, SHARED.uTime.value, SHARED.uRain.value, SHARED.uWind.value, cst.cloudVis > 0.5 && cst.rainAmt > 0.3, cst.spos[0], cst.spos[1] + 2.9, cst.spos[2], 0, 0);
+      breezeLanterns(particles, cst.spos[0], cst.spos[2], 2.6, cst.breezeAmt, dt);
+      particlePool.userData.update(particles);
+      structures.userData.update(world, dt);
+      villagers.userData.update(world);
+    }
     atmo.update(dt);
     // the weather feeds back into the sim: monsoon rains harder and evaporates less; golden hour grows crops fastest
     world.params.rain = TUNING.rain * (1 + 8 * SHARED.uRain.value);
@@ -192,7 +214,7 @@ function boot() {
     // Test hook (debug builds only): lets tools/test-interact.mjs drive and inspect the live app.
     const pv = new THREE.Vector3();
     window.__mythos = {
-      world, ctl, atmo, camera, controls, flora,
+      world, ctl, atmo, camera, controls, flora, particles, structures, villagers,
       project(x, y, z) {
         pv.set(x, y, z).project(camera);
         const r = canvas.getBoundingClientRect();
