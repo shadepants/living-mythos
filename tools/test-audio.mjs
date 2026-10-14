@@ -27,6 +27,7 @@ function fakeCtx() {
   ctx.suspend = () => { ctx.state = 'suspended'; };
   const mk = (kind, params) => () => { const n = new Node(kind, ctx); for (const [k, v] of Object.entries(params || {})) n[k] = new Param(v); return n; };
   ctx.createGain = mk('gain', { gain: 1 });
+  ctx.createDynamicsCompressor = mk('limiter', { threshold: 0, knee: 0, ratio: 1, attack: 0, release: 0 });
   ctx.createOscillator = mk('osc', { frequency: 440 });
   ctx.createBiquadFilter = mk('biquad', { frequency: 350, Q: 1 });
   ctx.createDelay = mk('delay', { delayTime: 0 });

@@ -1,5 +1,6 @@
 import { GRID_W, GRID_H, GRID_N, CELL_SIZE } from './grid.js';
 import { sampleGrid } from './sample.js';
+import { KIND_DWELLING, KIND_MONOLITH, KIND_MYTH } from './civ.js';
 
 // Sun shadows from the heightfield (replaces a GPU shadow-map pass, which lost the WebGL context on the phone GPU).
 // world.shade[i] in [0,1]: 1 = fully lit, 0 = in the shadow of higher ground. Refreshed a slice of rows per call.
@@ -46,7 +47,45 @@ export function stepShade(world, state, sun, rowsPerCall) {
   const r0 = state.rows;
   const r1 = Math.min(GRID_H, r0 + rowsPerCall);
   computeShadeRows(world, sun.x, sun.y, sun.z, r0, r1);
+  stampObjectShadows(world, sun.x, sun.y, sun.z, r0, r1);
   state.rows = r1 >= GRID_H ? 0 : r1;
   if (r1 >= GRID_H) { state.sweepDone++; return true; }
   return false;
+}
+
+// Soft cast shadows of buildings, monoliths and myth stones as ellipses stretched away from the sun, stamped into the
+// shade field for rows [row0, row1). Heights are rough world-space object heights.
+export function stampObjectShadows(world, dx, dy, dz, row0, row1) {
+  const civ = world.civ, shade = world.shade;
+  const hl = Math.sqrt(dx * dx + dz * dz);
+  if (hl < 1e-4) return;
+  const ux = dx / hl, uz = dz / hl;                     // toward the sun
+  const rise = Math.max(0.2, dy / hl);
+  for (let s = 0; s < civ.nS; s++) {
+    const k = civ.sKind[s];
+    let H, wide;
+    if (k === KIND_DWELLING) { H = 0.55 * Math.min(1, civ.sBuild[s]); wide = 0.3; }
+    else if (k === KIND_MONOLITH) { H = 1.2 * Math.min(1, civ.sBuild[s]); wide = 0.13; }
+    else if (k === KIND_MYTH) { H = 0.55; wide = 0.16; }
+    else continue;
+    if (H <= 0.02) continue;
+    const len = Math.min(1.5, H / rise);
+    const along = len * 0.5 + wide;                      // semi-axis along the shadow
+    const cx = civ.sX[s] - ux * len * 0.5, cz = civ.sZ[s] - uz * len * 0.5;
+    const reach = along + 0.15;
+    const gz0 = Math.max(row0, Math.floor(((cz - reach) + 10) / CELL_SIZE) - 1), gz1 = Math.min(row1 - 1, Math.ceil(((cz + reach) + 10) / CELL_SIZE) + 1);
+    const gx0 = Math.max(0, Math.floor(((cx - reach) + 10) / CELL_SIZE) - 1), gx1 = Math.min(GRID_W - 1, Math.ceil(((cx + reach) + 10) / CELL_SIZE) + 1);
+    for (let z = gz0; z <= gz1; z++) {
+      for (let x = gx0; x <= gx1; x++) {
+        const wx = -10 + (x + 0.5) * CELL_SIZE - cx, wz = -10 + (z + 0.5) * CELL_SIZE - cz;
+        const a = wx * ux + wz * uz, b = -wx * uz + wz * ux;
+        const q = (a * a) / (along * along) + (b * b) / (wide * wide);
+        if (q >= 1) continue;
+        const dark = 0.62 * (1 - q * q);                // soft edge, darkest at the core
+        const i = z * GRID_W + x;
+        const v = 1 - dark;
+        if (v < shade[i]) shade[i] = v;
+      }
+    }
+  }
 }

@@ -63,7 +63,13 @@ export function stepParticles(p, world, dt, time, rainAmt, windAmp, cloudOn, cx,
         const r = Math.hypot(gx, gz) || 1;
         const px = gx / r * 9.2, pz = gz / r * 9.2;
         const mist = rng.next() < 0.45;
-        spawn(p, P_SPRAY, px, -0.55, pz, gx / r * (0.2 + Math.random() * 0.5), mist ? 0.3 + Math.random() * 0.3 : -0.4 - Math.random() * 0.8, gz / r * (0.2 + Math.random() * 0.5), mist ? 2.4 : 1.1, mist ? 0.18 : 0.05, mist ? 1 : 0);
+        if (mist) {
+          // mist gathers where the cascade meets the cliff foot (skirt radius ~5.4 at y ~ -5.2) and rolls outward
+          const fr = 5.5 + Math.random() * 0.6;
+          spawn(p, P_SPRAY, gx / r * fr, -5.1 - Math.random() * 0.8, gz / r * fr, gx / r * (0.15 + Math.random() * 0.3), 0.25 + Math.random() * 0.25, gz / r * (0.15 + Math.random() * 0.3), 3.2, 0.3, 1);
+        } else {
+          spawn(p, P_SPRAY, px, -0.55, pz, gx / r * (0.2 + Math.random() * 0.5), -0.4 - Math.random() * 0.8, gz / r * (0.2 + Math.random() * 0.5), 1.1, 0.05, 0);
+        }
       }
     }
   }

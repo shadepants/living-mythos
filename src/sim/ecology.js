@@ -19,7 +19,7 @@ export function ecologyStep(world, dt) {
     let wet = water[i] * TUNING.moistFromWater;
     if (wet > 1) wet = 1;
     let m = moisture[i];
-    if (wet > m) m += (wet - m) * absorb; else m -= m * evap * (1 + TUNING.moistElevEvap * (elev[i] > 0 ? elev[i] : 0));
+    if (wet > m) m += (wet - m) * absorb; else m -= m * evap * (1 + TUNING.moistElevEvap * (elev[i] > 0 ? elev[i] : 0)) / (soil[i] * soil[i]);   // good soil holds water
     m += rainGain;
     if (m > 1) m = 1; else if (m < 0) m = 0;
     moisture[i] = m;
@@ -28,7 +28,7 @@ export function ecologyStep(world, dt) {
     let f = fertility[i];
     // fertility relaxes toward a target set by soil moisture, soil quality and trampling
     let sm = (m - 0.12) / 0.73; sm = sm < 0 ? 0 : sm > 1 ? 1 : sm; sm = sm * sm * (3 - 2 * sm);
-    let target = sm * (0.5 + 0.5 * soil[i]) * (1 - c);
+    let target = sm * (0.35 + 0.8 * soil[i]) * (1 - c);
     if (target > 1) target = 1;
     f += (target - f) * (target > f ? grow : decay + cdecay * c);
     fertility[i] = f > 1 ? 1 : f < 0 ? 0 : f;

@@ -12,8 +12,10 @@ import { createDebugOverlay } from './ui/debug.js';
 import { createReporter } from './ui/report.js';
 import { QUALITY, TIER_NAMES, pickInitialTier, createGovernor, governorSample } from './gl/quality.js';
 import { createAudioEngine } from './audio/engine.js';
+import { SCALES, degreeFreq, semiFreq, TIMBRE } from './audio/music.js';
 import { createDirector, directorStep } from './audio/director.js';
 import { createController } from './input/controller.js';
+import { createWaterfalls } from './gl/waterfall.js';
 import { createStructures } from './gl/structures.js';
 import { createVillagers } from './gl/villagers.js';
 import { createParticlePool } from './gl/particlepool.js';
@@ -115,6 +117,8 @@ function boot() {
   scene.add(islandTop);
   scene.add(createBasaltSkirt());
   scene.add(createWaterSurface(grid, caps));
+  const waterfalls = createWaterfalls(world);
+  scene.add(waterfalls);
   const flora = createFlora(caps, 3500);
   scene.add(flora);
   const structures = createStructures(caps);
@@ -324,6 +328,7 @@ function boot() {
       breezeLanterns(particles, cst.spos[0], cst.spos[2], 2.6, cst.breezeAmt, dt);
       particlePool.userData.update(particles);
       structures.userData.update(world, dt);
+      waterfalls.userData.update(world, dt);
       villagers.userData.update(world);
     }
     if (audio.ready) {
@@ -366,6 +371,8 @@ function boot() {
     // Test hook (debug builds only): lets tools/test-interact.mjs drive and inspect the live app.
     const pv = new THREE.Vector3();
     window.__mythos = {
+      waterfalls,
+      mods: { createAudioEngine, SCALES, degreeFreq, semiFreq, TIMBRE },
       world, ctl, atmo, camera, controls, flora, particles, structures, villagers, audio, director, photo, gov, save, takePhoto, restored,
       snapshot() { renderFrame(); return canvas.toDataURL('image/png'); },
       project(x, y, z) {

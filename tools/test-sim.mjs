@@ -6,7 +6,7 @@ import { simStep } from '../src/sim/sim.js';
 import { ecologyStep } from '../src/sim/ecology.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { Rng } from '../src/sim/rng.js';
-import { computeShadeRows } from '../src/sim/shade.js';
+import { computeShadeRows, stampObjectShadows } from '../src/sim/shade.js';
 import { createParticles, stepParticles, breezeLanterns, PARTICLE_CAP, P_ROCK, P_LANTERN, P_RAIN, P_SPRAY, P_EMBER } from '../src/sim/particles.js';
 import { emitEvent, EV_ROCKFALL, EV_DUST, EV_LANTERN } from '../src/sim/events.js';
 import { seedCivilization, civStep, KIND_BRIDGE, KIND_DWELLING, KIND_MYTH, ROLE_MYSTIC, ST_BUILD, recordMyth, MYTH_FLOOD, MYTH_MAX } from '../src/sim/civ.js';
@@ -418,6 +418,15 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   check('shade: a full sweep is cheap enough to amortise (<60 ms)', ms < 60, `${ms.toFixed(1)} ms`);
   let ok = true; for (let i = 0; i < GRID_N; i++) if (!(w.shade[i] >= 0 && w.shade[i] <= 1)) ok = false;
   check('shade: values stay in [0,1]', ok);
+  // a building shades the ground on the side away from the sun, not the sunny side
+  const wb = createWorld(10); prewarm(wb); seedCivilization(wb);
+  const sx = wb.civ.sX[0], sz = wb.civ.sZ[0];
+  wb.elev.fill(0.3); for (let i = 0; i < GRID_N; i++) if (wb.mask[i]) wb.elev[i] = -0.6;
+  const sun = { x: -0.8, y: 0.4, z: 0 };                        // sun toward -x, low
+  computeShadeRows(wb, sun.x, sun.y, sun.z, 0, 128); stampObjectShadows(wb, sun.x, sun.y, sun.z, 0, 128);
+  const cellW = (x, z) => Math.round((z + 10) / 20 * 128 - 0.5) * 128 + Math.round((x + 10) / 20 * 128 - 0.5);
+  const away = wb.shade[cellW(sx + 0.35, sz)], toward = wb.shade[cellW(sx - 0.6, sz)];
+  check('shade: a dwelling casts a soft shadow away from the sun only', away < 0.6 && toward > 0.95, `away ${away.toFixed(2)} sunny side ${toward.toFixed(2)}`);
 }
 
 // 6. prewarm produces a believable island

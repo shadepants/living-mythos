@@ -60,7 +60,11 @@ export function createAudioEngine(makeCtx) {
   function build() {
     const ctx = makeCtx();
     E.ctx = ctx;
-    const out = ctx.createGain(); out.gain.value = 0.8; out.connect(ctx.destination);
+    // master: gain -> brickwall-ish limiter -> speakers, so dense passages (many voices + reverb + delay) can never clip
+    const out = ctx.createGain(); out.gain.value = 0.8;
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -9; limiter.knee.value = 6; limiter.ratio.value = 14; limiter.attack.value = 0.003; limiter.release.value = 0.22;
+    out.connect(limiter); limiter.connect(ctx.destination);
 
     const master = ctx.createBiquadFilter(); master.type = 'lowpass'; master.frequency.value = 9000; master.Q.value = 0.7;
     const dry = ctx.createGain(); dry.gain.value = 0.85;
@@ -108,7 +112,7 @@ export function createAudioEngine(makeCtx) {
     const envRev = ctx.createGain(); envRev.gain.value = 0.12; envBus.connect(envRev); envRev.connect(conv);
     src.start();
 
-    E.nodes = { out, master, dry, delaySend, revSend, wind, river, rumble, envBus };
+    E.nodes = { out, limiter, master, dry, delaySend, revSend, wind, river, rumble, envBus };
     E.ready = true;
   }
 
@@ -149,7 +153,10 @@ export function createAudioEngine(makeCtx) {
     v.fm.gain.cancelScheduledValues(t0); v.fm.gain.setValueAtTime(tim.fm * vel, t0); v.fm.gain.setTargetAtTime(0, t0, tim.decay * 0.5);
     v.hg.gain.cancelScheduledValues(t0); v.hg.gain.setValueAtTime(tim.harmAmt * vel, t0); v.hg.gain.setTargetAtTime(0, t0, tim.decay * 0.35);
     v.pan.pan.cancelScheduledValues(t0); v.pan.pan.setValueAtTime(pan < -1 ? -1 : pan > 1 ? 1 : pan, t0);
-    const peak = tim.attackGain * vel;
+    // loudness shrinks as the texture thickens (1 voice: full; 8 busy voices: ~half)
+    let busy = 0;
+    for (let i = 0; i < E.voices.length; i++) if (E.voices[i].busyUntil > t) busy++;
+    const peak = tim.attackGain * vel / (1 + 0.14 * busy);
     if (!stolen) v.vg.gain.setValueAtTime(0, t0);                       // fresh voices start silent; stolen ones decayed to ~0
     v.vg.gain.linearRampToValueAtTime(peak, t0 + 0.005);                // 5 ms linear attack
     v.vg.gain.setTargetAtTime(0, t0 + 0.005, tim.decay);                // exponential decay

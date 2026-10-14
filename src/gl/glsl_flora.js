@@ -55,7 +55,7 @@ export const GLSL_FLORA_VERT_POS = /* glsl */`
   vec3 grain = lin(vec3(0.86, 0.72, 0.28));
   vec3 emer = lin(vec3(0.14, 0.58, 0.26));
   vec3 fc = mix(ochre, grain, smoothstep(0.22, 0.38, fert));
-  fc = mix(fc, emer, smoothstep(0.62, 0.78, fert));
+  fc = mix(fc, emer, smoothstep(0.48, 0.68, fert));
   if (part > 0.25 && part < 0.75) fc = lin(vec3(0.35, 0.24, 0.15));
   else if (part >= 0.75) fc = mix(emer, fc, 0.35);
   float hv = hash12(fBase.xz * 13.7);
