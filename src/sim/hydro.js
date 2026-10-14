@@ -84,7 +84,7 @@ export function hydroStep(world) {
     const kCap = p.kCap, kEr = p.kErode * dt, kDep = p.kDeposit * dt;
     const maxD = TUNING.maxDElev, floor = TUNING.elevFloor, gain = TUNING.alluvialGain;
     for (let i = 0; i < GRID_N; i++) {
-      if (mask[i] === 1) { sediment[i] = 0; continue; }
+      if (mask[i] === 1) { if (p.drainRim) sediment[i] = 0; continue; }
       const dep = water[i];
       let cap = 0;
       if (dep > TUNING.erodeMinDepth) {
@@ -102,22 +102,39 @@ export function hydroStep(world) {
         let d = kDep * (sed - cap);
         if (d > maxD) d = maxD;
         if (d > sed) d = sed;
+        // sediment never builds a spike above all four neighbours (it would be washed on in reality)
+        const xx = i % GRID_W, zz = (i / GRID_W) | 0;
+        const eL = xx > 0 ? elev[i - 1] : elev[i], eR = xx < GRID_W - 1 ? elev[i + 1] : elev[i];
+        const eU = zz > 0 ? elev[i - GRID_W] : elev[i], eD = zz < GRID_H - 1 ? elev[i + GRID_W] : elev[i];
+        let hmax = eL > eR ? eL : eR;
+        if (eU > hmax) hmax = eU;
+        if (eD > hmax) hmax = eD;
+        const room = hmax + TUNING.depositLip - elev[i];
+        if (d > room) d = room > 0 ? room : 0;
         elev[i] += d;
         sediment[i] = sed - d;
         const f = fertility[i] + d * gain;
         fertility[i] = f > 1 ? 1 : f;
       }
     }
+    // conservative donor-cell transport: each cell hands a velocity-proportional fraction to its downstream neighbours
+    sedTmp.set(sediment);
     for (let z = 0; z < GRID_H; z++) {
       for (let x = 0; x < GRID_W; x++) {
         const i = z * GRID_W + x;
-        let px = x - vx[i] * dt, pz = z - vz[i] * dt;
-        if (px < 0) px = 0; else if (px > GRID_W - 1.001) px = GRID_W - 1.001;
-        if (pz < 0) pz = 0; else if (pz > GRID_H - 1.001) pz = GRID_H - 1.001;
-        const x0 = px | 0, z0 = pz | 0, fx = px - x0, fz = pz - z0;
-        const j = z0 * GRID_W + x0;
-        const a = sediment[j], b = sediment[j + 1], c = sediment[j + GRID_W], d2 = sediment[j + GRID_W + 1];
-        sedTmp[i] = (a + (b - a) * fx) + ((c + (d2 - c) * fx) - (a + (b - a) * fx)) * fz;
+        const sed = sediment[i];
+        if (sed <= 0) continue;
+        const ux = vx[i] * dt, uz = vz[i] * dt;
+        let ax = ux < 0 ? -ux : ux, az = uz < 0 ? -uz : uz;
+        const nx = ux < 0 ? x - 1 : x + 1, nz = uz < 0 ? z - 1 : z + 1;
+        if (nx < 0 || nx >= GRID_W) ax = 0;
+        if (nz < 0 || nz >= GRID_H) az = 0;
+        const tot = ax + az;
+        const scale = tot > 0.9 ? 0.9 / tot : 1;
+        ax *= scale; az *= scale;
+        sedTmp[i] -= (ax + az) * sed;
+        if (ax > 0) sedTmp[z * GRID_W + nx] += ax * sed;
+        if (az > 0) sedTmp[nz * GRID_W + x] += az * sed;
       }
     }
     sediment.set(sedTmp);

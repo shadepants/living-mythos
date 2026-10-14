@@ -104,6 +104,29 @@ export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
   float wetTerr = clamp(tA.g * 14.0 + tB.r * 0.6, 0.0, 1.0);
   col *= (1.0 - 0.45 * wetTerr) * (1.0 - 0.16 * uWet);
   diffuseColor.rgb = col;
+
+  // expanding tectonic / harmonic ring waves from sculpting, monoliths and builders
+  vec3 ringGlow = vec3(0.0);
+  for (int k = 0; k < 8; k++) {
+    vec4 rA = uRingA[k];
+    vec4 rB = uRingB[k];
+    float age = uTime - rA.z;
+    if (rB.x > 0.0 && age > 0.0 && age < rB.y) {
+      float R = age * rB.z;
+      float d = length(vWP.xz - rA.xy);
+      float band = exp(-pow((d - R) / 0.33, 2.0));
+      float band2 = exp(-pow((d - R * 0.62) / 0.22, 2.0)) * step(0.5, rA.w) * 0.6;
+      float fade = 1.0 - age / rB.y;
+      vec3 gold = vec3(1.0, 0.72, 0.3), cyan = vec3(0.3, 0.95, 1.0), dust = vec3(0.75, 0.72, 0.65);
+      vec3 rc = rA.w < 0.5 ? gold : (rA.w < 1.5 ? mix(gold, cyan, band2 / (band + band2 + 1e-3)) : dust);
+      ringGlow += rc * (band + band2) * fade * rB.x;
+    }
+  }
+`;
+
+export const GLSL_ISLAND_FRAG_EMISSIVE = /* glsl */`
+  #include <emissivemap_fragment>
+  totalEmissiveRadiance += ringGlow;
 `;
 
 export const GLSL_ISLAND_FRAG_ROUGH = /* glsl */`

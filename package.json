@@ -6,7 +6,8 @@
   "scripts": {
     "build": "node tools/build.mjs",
     "test": "node --expose-gc tools/test-sim.mjs && node tools/test-geo.mjs",
-    "check": "node tools/build.mjs && node tools/audit.mjs && node tools/smoke.mjs --query debug=1 --expect 8"
+    "interact": "node tools/test-interact.mjs",
+    "check": "node tools/build.mjs && node tools/audit.mjs && node tools/smoke.mjs --query debug=1 --expect 9"
   },
   "devDependencies": {
     "puppeteer-core": "~25.14.0",

@@ -1,6 +1,7 @@
 import { TUNING } from './tuning.js';
 import { generateIsland } from './island.js';
 import { GRID_N } from './grid.js';
+import { createEventRing } from './events.js';
 
 
 // All simulation state, allocated once (spec 3.1).
@@ -18,6 +19,9 @@ export function createWorld(seed) {
     sedTmp: f(),                         // scratch for sediment advection
     ecoTmp: f(),                         // scratch for ecology diffusion
     ecoCount: 0,
+    events: createEventRing(),
+    monoliths: new Float32Array(8 * 4),   // x, z, placedAt, active
+    monoPulse: new Float32Array(8),
     springs: new Int32Array(TUNING.springCount),
     rimCells: null,
     params: {
@@ -27,7 +31,7 @@ export function createWorld(seed) {
       kCap: TUNING.kCap, kErode: TUNING.kErode, kDeposit: TUNING.kDeposit,
       ecoGrow: 1.0, evapMul: 1.0,
     },
-    stats: { rimDrained: 0, flux: 0, substeps: 0 },
+    stats: { rimDrained: 0, flux: 0, substeps: 0, time: 0 },
   };
   generateIsland(world);
   return world;

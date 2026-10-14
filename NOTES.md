@@ -1,7 +1,7 @@
 # Living Mythos — build notes
 
 ## Status
-- **Current milestone:** M2 built (terrain, water, skirt, shadows, composite). Compile-verified, NOT visually verified.
+- **Current milestone:** M5 done (cursor, 4 tools, dock, touch). Next: M6 villagers/structures/particles. All GL work is compile-verified only; input/tool logic is verified by `npm run interact` (real mouse/touch in headless Chrome). NOTHING has been seen rendered.
 - **Headless Chrome (important):** `~/.cache/ms-playwright/chromium_headless_shell-*` exists; `tools/smoke.mjs`
   drives it via puppeteer-core. SwiftShader's GPU process **segfaults ~1s after the first draw in this PRoot**
   (every flag combo tried), so there are **no screenshots/pixel checks**. But shader compile/link errors and JS
@@ -47,3 +47,18 @@ across all modules (flat scope after inlining; build fails on duplicates); no im
 
 ## Known bugs
 (none known; untested in browser)
+
+## M3-M5 notes
+- Sim: ecology (moisture/fertility/compaction/culture) every 4 hydro substeps via `simStep`; tools in `src/sim/tools.js`;
+  event ring in `src/sim/events.js` (renderer rings, audio and particles each keep their own cursor).
+- Hydrology fixes found by long-run tests: sediment transport is now conservative donor-cell (the semi-Lagrangian version
+  created mass and inflated land ~30%); deposition can't raise a cell more than `depositLip` above its highest neighbour
+  (a spike grew to elev 6); rain/evap/spring rebalanced (rain 0.0002, evap 0.0008, spring 0.5) so ponds reach equilibrium
+  (~9-10% wet) instead of flooding. Soil moisture uses `moistFromRain`, standing water uses `rain`.
+- Raymarch: 32 steps + 4 binary refinements, matches a dense reference except on cliff-lip grazing rays (~1%); the
+  controller ignores hits with r > 8.7 so the cliff band is never acted on.
+- Headless: `npm run interact` drives dock, mouse (left/right/Shift), touch tap/long-press/drag and checks sim effects.
+  The page exposes `window.__mythos` only with `?debug=1`.
+- Controls: mouse left-hold on island = tool, right/Shift = alt (carve); drag off-island orbits; touch tap = pulse, long-press
+  400ms = alt hold, drag = orbit, pinch = zoom. Keys: 1-4 tools, Q/W/E atmosphere, D drift.
+- Weather feeds the sim: monsoon rain x9, golden hour grows crops fastest (set each frame in main.js).

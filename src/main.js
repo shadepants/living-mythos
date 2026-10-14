@@ -4,6 +4,11 @@ import { detectCaps } from './gl/caps.js';
 import { createSceneTarget, createComposite } from './gl/post.js';
 import { SHARED } from './gl/shared.js';
 import { createSimTextures, packSimTextures } from './gl/simtex.js';
+import { createCursor } from './gl/cursor.js';
+import { createRaincloud } from './gl/cloud.js';
+import { createRingFx } from './gl/fxbridge.js';
+import { createDock, TOOL_HINTS } from './ui/dock.js';
+import { createController } from './input/controller.js';
 import { createFlora } from './gl/flora.js';
 import { createSkyDome } from './gl/sky.js';
 import { createAtmosphere } from './gl/atmo.js';
@@ -80,6 +85,10 @@ function boot() {
   scene.add(createWaterSurface(grid, caps));
   const flora = createFlora(caps, 3500);
   scene.add(flora);
+  scene.add(createCursor(caps));
+  const cloudFx = createRaincloud();
+  scene.add(cloudFx);
+  const ringFx = createRingFx(world);
 
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(0, 0, 0);
@@ -89,6 +98,19 @@ function boot() {
   controls.maxDistance = 44;
   controls.maxPolarAngle = 1.38;
   controls.update();
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+
+  // --- input + dock ---
+  const dock = createDock(document.getElementById('ui'), {
+    onTool: (i) => { ctl.setTool(i); },
+    onAtmo: (v) => { atmo.setTarget(v); syncAtmoUi(); },
+    onDrift: () => { atmo.pinned = false; atmo.drift = true; syncAtmoUi(); },
+  });
+  const ctl = createController({
+    canvas, camera, controls, world, cloud: cloudFx,
+    onChange: (i) => { dock.setTool(i); dock.showHint(TOOL_HINTS[i]); },
+  });
+  function syncAtmoUi() { dock.setAtmo(atmo.pinned ? (atmo.target < 0.25 ? 0 : atmo.target < 0.75 ? 1 : 2) : -1, !atmo.pinned && atmo.drift); }
 
   // --- post ---
   const post = createComposite(caps, 12);
@@ -116,9 +138,13 @@ function boot() {
 
   const ATMO_KEYS = { KeyQ: 0, KeyW: 0.5, KeyE: 1 };
   window.addEventListener('keydown', (ev) => {
-    if (ev.code in ATMO_KEYS) atmo.setTarget(ATMO_KEYS[ev.code]);
-    else if (ev.code === 'KeyD') { atmo.pinned = false; atmo.drift = true; }
+    if (ev.code in ATMO_KEYS) { atmo.setTarget(ATMO_KEYS[ev.code]); syncAtmoUi(); }
+    else if (ev.code === 'KeyD') { atmo.pinned = false; atmo.drift = true; syncAtmoUi(); }
+    else if (ev.code >= 'Digit1' && ev.code <= 'Digit4') ctl.setTool(parseInt(ev.code.slice(5), 10) - 1);
   });
+  ctl.setTool(0);
+  syncAtmoUi();
+  dock.showHint('Drag to orbit · pinch or scroll to zoom · pick a tool below', 6000);
 
   // Timer is core in three r186 (no addon copy ships in r186; see NOTES.md).
   const timer = new THREE.Timer();
@@ -148,9 +174,11 @@ function boot() {
     if (n > 0) packSimTextures(world, simTex);
 
     controls.update();
+    ctl.update(dt, SHARED.uTime.value);
+    ringFx.update();
     atmo.update(dt);
     // the weather feeds back into the sim: monsoon rains harder and evaporates less; golden hour grows crops fastest
-    world.params.rain = TUNING.rain * (1 + 5 * SHARED.uRain.value);
+    world.params.rain = TUNING.rain * (1 + 8 * SHARED.uRain.value);
     world.params.evapMul = 1 - 0.6 * SHARED.uRain.value;
     world.params.ecoGrow = 1.3 - 0.6 * SHARED.uAurora.value - 0.3 * SHARED.uRain.value;
     post.material.uniforms.uFocusDist.value = camera.position.distanceTo(controls.target);
@@ -159,7 +187,19 @@ function boot() {
     if (DEBUG && frame === 1) console.info('[mythos] programs compiled:', renderer.info.programs.length);
   });
 
-  if (DEBUG) console.info('[mythos] caps', JSON.stringify(caps));
+  if (DEBUG) {
+    console.info('[mythos] caps', JSON.stringify(caps));
+    // Test hook (debug builds only): lets tools/test-interact.mjs drive and inspect the live app.
+    const pv = new THREE.Vector3();
+    window.__mythos = {
+      world, ctl, atmo, camera, controls, flora,
+      project(x, y, z) {
+        pv.set(x, y, z).project(camera);
+        const r = canvas.getBoundingClientRect();
+        return [r.left + (pv.x * 0.5 + 0.5) * r.width, r.top + (-pv.y * 0.5 + 0.5) * r.height];
+      },
+    };
+  }
 }
 
 boot();

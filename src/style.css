@@ -3,3 +3,45 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0a14; tou
 #fallback { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 2rem;
   color: #e8dcc4; font: 16px/1.5 system-ui, sans-serif; text-align: center; }
 #fallback[hidden] { display: none; }
+
+/* ---- dock ---- */
+#ui { position: fixed; inset: 0; pointer-events: none; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+#dock {
+  position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex; align-items: stretch; gap: 4px; padding: 6px 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.05));
+  backdrop-filter: blur(16px) saturate(1.35); -webkit-backdrop-filter: blur(16px) saturate(1.35);
+  border: 1px solid rgba(255,255,255,0.20);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -1px 0 rgba(255,255,255,0.05), 0 10px 30px rgba(8,6,20,0.40);
+  pointer-events: auto; touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  max-width: calc(100vw - 16px);
+}
+#dock .sep { width: 1px; margin: 8px 4px; background: rgba(255,255,255,0.22); }
+#dock button {
+  all: unset; box-sizing: border-box; cursor: pointer; text-align: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-width: 52px; min-height: 52px; padding: 6px 8px; border-radius: 22px;
+  color: rgba(255,248,236,0.78); font-size: 10.5px; letter-spacing: 0.02em; line-height: 1;
+  transition: background 0.18s, color 0.18s, transform 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+#dock button svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#dock button:hover { background: rgba(255,255,255,0.10); color: #fff; }
+#dock button:active { transform: scale(0.95); }
+#dock button:focus-visible { outline: 2px solid rgba(255,225,170,0.9); outline-offset: 1px; }
+#dock button[aria-pressed="true"] {
+  background: linear-gradient(180deg, rgba(255,226,170,0.34), rgba(255,190,120,0.16));
+  color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,0.45), 0 0 14px rgba(255,200,130,0.28);
+}
+#hint {
+  position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 76px); transform: translateX(-50%);
+  padding: 6px 14px; border-radius: 999px; font-size: 12.5px; color: rgba(255,250,240,0.92); white-space: nowrap;
+  background: rgba(14,12,26,0.42); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.14);
+  opacity: 0; transition: opacity 0.5s; pointer-events: none; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis;
+}
+#hint.show { opacity: 1; }
+@media (pointer: coarse) { #dock button { min-width: 56px; min-height: 56px; } }
+@media (max-width: 520px) { #dock button { min-width: 44px; padding: 6px 5px; font-size: 9.5px; } #dock { gap: 2px; padding: 5px 6px; } }
+@media (prefers-reduced-motion: reduce) { #dock button, #hint { transition: none; } }

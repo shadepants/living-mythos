@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { SHARED } from './shared.js';
 import {
   GLSL_SIM, GLSL_TERRAIN_HEIGHT, GLSL_ISLAND_VERT_NORMAL, GLSL_ISLAND_VERT_POS,
-  GLSL_ISLAND_FRAG_COLOR, GLSL_ISLAND_FRAG_ROUGH, GLSL_WATER_VERT, GLSL_WATER_FRAG,
+  GLSL_ISLAND_FRAG_COLOR, GLSL_ISLAND_FRAG_ROUGH, GLSL_ISLAND_FRAG_EMISSIVE, GLSL_WATER_VERT, GLSL_WATER_FRAG,
 } from './glsl.js';
 import { GRID_W, GRID_H, CELL_SIZE } from '../sim/grid.js';
 import { hash2 } from '../sim/noise.js';
@@ -44,6 +44,8 @@ function addSimUniforms(shader) {
   shader.uniforms.uTime = SHARED.uTime;
   shader.uniforms.uCell = SHARED.uCell;
   shader.uniforms.uWet = SHARED.uWet;
+  shader.uniforms.uRingA = SHARED.uRingA;
+  shader.uniforms.uRingB = SHARED.uRingB;
 }
 
 export function createIslandTop(grid, caps) {
@@ -56,9 +58,10 @@ export function createIslandTop(grid, caps) {
       .replace('#include <beginnormal_vertex>', GLSL_ISLAND_VERT_NORMAL)
       .replace('#include <begin_vertex>', GLSL_ISLAND_VERT_POS);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec2 vSimUv;\nuniform float uWet;\n${GLSL_SIM}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec2 vSimUv;\nuniform float uWet;\nuniform vec4 uRingA[8];\nuniform vec4 uRingB[8];\n${GLSL_SIM}`)
       .replace('#include <color_fragment>', GLSL_ISLAND_FRAG_COLOR)
-      .replace('#include <roughnessmap_fragment>', GLSL_ISLAND_FRAG_ROUGH);
+      .replace('#include <roughnessmap_fragment>', GLSL_ISLAND_FRAG_ROUGH)
+      .replace('#include <emissivemap_fragment>', GLSL_ISLAND_FRAG_EMISSIVE);
   };
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   if (!caps.floatLinear) depth.defines = { MANUAL_BILINEAR: '' };

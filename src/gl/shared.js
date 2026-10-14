@@ -18,6 +18,11 @@ export const SHARED = {
   uRain: { value: 0 },
   uNight: { value: 0 },
   uAurora: { value: 0 },
+  uRingA: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, -100, 0)) },  // x, z, t0, kind
+  uRingB: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 1, 4, 0)) },    // strength, life, speed
+  uCursor: { value: new THREE.Vector4(0, 0, 0, 1.5) },   // x, y, z, radius
+  uCursorCol: { value: new THREE.Color(1.0, 0.8, 0.4) },
+  uCursorA: { value: 0 },
   uCloud: { value: new THREE.Vector4(0, 0, 3, 0) },    // x, z, radius, strength (raincloud tool)
   uBreeze: { value: new THREE.Vector4(0, 0, 2.5, 0) }, // x, z, radius, strength (breeze tool)
 };
