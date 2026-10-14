@@ -20,7 +20,7 @@ export function createReporter(renderer, canvas, info) {
         post('/report', JSON.stringify({
           t: +t.toFixed(1), n: sent++, fps: +(frames / acc).toFixed(1), frameMs: +(ms / frames).toFixed(1), worstMs: +worst.toFixed(0), simMs: +(simMs / frames).toFixed(2),
           tier: info.tier(), programs, gpu, vendor, webgl2: true, dpr: window.devicePixelRatio, screen: [screen.width, screen.height], inner: [innerWidth, innerHeight],
-          canvas: [canvas.width, canvas.height], touch: navigator.maxTouchPoints, ua: navigator.userAgent, lost: gl.isContextLost(), loss: info.loss(), flags: location.search, input: info.input ? info.input() : null, errors: errors.splice(0),
+          canvas: [canvas.width, canvas.height], touch: navigator.maxTouchPoints, ua: navigator.userAgent, lost: gl.isContextLost(), loss: info.loss(), flags: location.search, saveKB: (() => { try { const v = localStorage.getItem('mythos.save.v1'); return v ? Math.round(v.length / 1024) : 0; } catch (e) { return -1; } })(), simTime: info.simTime ? +info.simTime().toFixed(0) : null, input: info.input ? info.input() : null, errors: errors.splice(0),
           villagers: info.villagers(), structures: info.structures(), particles: info.particles(), mem: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
         }));
         acc = 0; frames = 0; ms = 0; simMs = 0; worst = 0;
