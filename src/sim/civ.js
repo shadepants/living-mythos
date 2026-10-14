@@ -1,0 +1,556 @@
+import { TUNING } from './tuning.js';
+import { GRID_W, GRID_H, CELL_SIZE } from './grid.js';
+import { sampleGrid, worldToGridX, worldToGridZ } from './sample.js';
+import {
+  nextEvent, emitEvent, EV_BUILD_DONE, EV_DUST, EV_LANTERN, EV_CHIME, EV_GREET, EV_REVIVE, EV_MYTH,
+} from './events.js';
+
+// Roles
+export const ROLE_FORAGER = 0, ROLE_HAULER = 1, ROLE_MASON = 2, ROLE_MYSTIC = 3;
+// Villager states
+export const ST_IDLE = 0, ST_WALK = 1, ST_FORAGE = 2, ST_HAUL = 3, ST_BUILD = 4, ST_MIGRATE = 5, ST_PROCESSION = 6, ST_REST = 7, ST_GREET = 8, ST_CONSECRATE = 9;
+// Structure kinds
+export const KIND_DWELLING = 0, KIND_MONOLITH = 1, KIND_BRIDGE = 2, KIND_STEPS = 3, KIND_PAVING = 4;
+
+const MAX_ORDERS = 12;
+const HEAD_COS = new Float32Array([1, Math.cos(0.6), Math.cos(-0.6), Math.cos(1.2), Math.cos(-1.2)]);
+const HEAD_SIN = new Float32Array([0, Math.sin(0.6), Math.sin(-0.6), Math.sin(1.2), Math.sin(-1.2)]);
+
+export function createCiv() {
+  const nV = TUNING.villagers, nS = TUNING.structureCap;
+  const f = (n) => new Float32Array(n);
+  return {
+    nV,
+    vX: f(nV), vZ: f(nV), vVX: f(nV), vVZ: f(nV), vTX: f(nV), vTZ: f(nV), vCargo: f(nV), vEnergy: f(nV), vPhase: f(nV), vTimer: f(nV), vHeading: f(nV),
+    vRole: new Uint8Array(nV), vState: new Uint8Array(nV),
+    vHome: new Int32Array(nV).fill(-1), vJob: new Int32Array(nV).fill(-1), vAux: new Int32Array(nV).fill(-1),
+    nS: 0, dwellings: 0,
+    sX: f(nS), sZ: f(nS), sRot: f(nS), sBias: f(nS), sBuild: f(nS), sDecay: f(nS), sLum: f(nS), sDirX: f(nS), sDirZ: f(nS), sLen: f(nS),
+    sKind: new Uint8Array(nS), sActive: new Uint8Array(nS),
+    oX: f(MAX_ORDERS), oZ: f(MAX_ORDERS), oDirX: f(MAX_ORDERS), oDirZ: f(MAX_ORDERS), oLen: f(MAX_ORDERS), oProg: f(MAX_ORDERS), oDust: f(MAX_ORDERS),
+    oKind: new Uint8Array(MAX_ORDERS), oState: new Uint8Array(MAX_ORDERS), oWorker: new Int32Array(MAX_ORDERS).fill(-1), oStruct: new Int32Array(MAX_ORDERS).fill(-1),
+    food: 0, masons: 0, built: 0, bridges: 0, revived: 0, mythFirstBridge: false,
+    orderClock: 0, foundClock: 0, secClock: 0, lanternClock: 0, eventCursor: { i: 0 },
+  };
+}
+
+function cellOf(x, z) {
+  let gx = Math.round(worldToGridX(x)), gz = Math.round(worldToGridZ(z));
+  if (gx < 0) gx = 0; else if (gx > GRID_W - 1) gx = GRID_W - 1;
+  if (gz < 0) gz = 0; else if (gz > GRID_H - 1) gz = GRID_H - 1;
+  return gz * GRID_W + gx;
+}
+
+export function slopeAtCell(elev, i) {
+  const x = i % GRID_W, z = (i / GRID_W) | 0;
+  const l = x > 0 ? elev[i - 1] : elev[i], r = x < GRID_W - 1 ? elev[i + 1] : elev[i];
+  const u = z > 0 ? elev[i - GRID_W] : elev[i], d = z < GRID_H - 1 ? elev[i + GRID_W] : elev[i];
+  const gx = (r - l) * 0.5, gz = (d - u) * 0.5;
+  return Math.sqrt(gx * gx + gz * gz);
+}
+
+function addStructure(civ, kind, x, z, bias, build, dirX, dirZ, len) {
+  if (civ.nS >= TUNING.structureCap) return -1;
+  const s = civ.nS++;
+  civ.sKind[s] = kind; civ.sActive[s] = 1;
+  civ.sX[s] = x; civ.sZ[s] = z; civ.sBias[s] = bias; civ.sBuild[s] = build; civ.sDecay[s] = 0; civ.sLum[s] = 0;
+  civ.sDirX[s] = dirX; civ.sDirZ[s] = dirZ; civ.sLen[s] = len;
+  civ.sRot[s] = Math.atan2(dirX, dirZ);
+  if (kind === KIND_DWELLING) civ.dwellings++;
+  return s;
+}
+
+// Found the starting dwellings and place the villagers (spec 3.4).
+export function seedCivilization(world) {
+  const civ = world.civ, rng = world.rng;
+  civ.eventCursor.i = world.events.head;
+  const want = TUNING.startDwellings;
+  const minD2 = 1.7 * 1.7;
+  for (let attempt = 0; attempt < 6000 && civ.dwellings < want; attempt++) {
+    const x = rng.range(-6.6, 6.6), z = rng.range(-6.6, 6.6);
+    if (!siteOk(world, x, z, minD2, 0.5)) continue;
+    addStructure(civ, KIND_DWELLING, x, z, sampleGrid(world.culturalBias, x, z), 1, Math.sin(rng.next() * 6.28), Math.cos(rng.next() * 6.28), 0);
+    civ.sRot[civ.nS - 1] = rng.next() * 6.283;
+  }
+  // relax: if the island is too wet/steep for 14 sites, take what we found (at least a few)
+  for (let v = 0; v < civ.nV; v++) {
+    const role = v < 68 ? ROLE_FORAGER : v < 92 ? ROLE_HAULER : v < 102 ? ROLE_MASON : ROLE_MYSTIC;
+    civ.vRole[v] = role;
+    if (role === ROLE_MASON) civ.masons++;
+    const home = civ.dwellings > 0 ? v % civ.dwellings : -1;
+    civ.vHome[v] = home;
+    const hx = home >= 0 ? civ.sX[home] : 0, hz = home >= 0 ? civ.sZ[home] : 0;
+    let px = hx, pz = hz;
+    for (let t = 0; t < 30; t++) {
+      const a = rng.next() * 6.283, r = 0.15 + rng.next() * 0.6;
+      const cx = hx + Math.cos(a) * r, cz = hz + Math.sin(a) * r;
+      if (world.water[cellOf(cx, cz)] < 0.006 && Math.hypot(cx, cz) < 8.2) { px = cx; pz = cz; break; }
+    }
+    civ.vX[v] = px; civ.vZ[v] = pz;
+    civ.vTX[v] = civ.vX[v]; civ.vTZ[v] = civ.vZ[v];
+    civ.vEnergy[v] = 0.6 + rng.next() * 0.4;
+    civ.vTimer[v] = rng.next() * 1.5;
+    civ.vPhase[v] = rng.next() * 6.283;
+    civ.vHeading[v] = rng.next() * 6.283;
+    civ.vState[v] = ST_IDLE;
+  }
+}
+
+function siteOk(world, x, z, minD2, minFert) {
+  if (Math.hypot(x, z) > 7.6) return false;
+  const i = cellOf(x, z);
+  if (world.water[i] > 0.004 || world.engCover[i] !== 0) return false;
+  if (slopeAtCell(world.elev, i) > 0.026) return false;
+  if (world.fertility[i] < minFert) return false;
+  const civ = world.civ;
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sKind[s] !== KIND_DWELLING && civ.sKind[s] !== KIND_MONOLITH) continue;
+    const dx = civ.sX[s] - x, dz = civ.sZ[s] - z;
+    if (dx * dx + dz * dz < minD2) return false;
+  }
+  return true;
+}
+
+function nearestDwelling(civ, x, z, needHealthy) {
+  let best = -1, bd = 1e9;
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1) continue;
+    if (needHealthy && civ.sDecay[s] > 0.5) continue;
+    const dx = civ.sX[s] - x, dz = civ.sZ[s] - z, d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+
+function nearestMonolith(world, x, z) {
+  const m = world.monoliths;
+  let best = -1, bd = 1e9;
+  for (let k = 0; k < 8; k++) {
+    if (m[k * 4 + 3] === 0) continue;
+    const dx = m[k * 4] - x, dz = m[k * 4 + 1] - z, d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = k; }
+  }
+  return best;
+}
+
+// Local cost of stepping on a world position (slope, wading, unbridged deep water, cliff edge).
+function stepCost(world, x, z) {
+  const i = cellOf(x, z);
+  const cov = world.engCover[i];
+  let c = slopeAtCell(world.elev, i) * 14;
+  const w = world.water[i];
+  if (cov === 0) { if (w > 0.025) c += 2.4; if (w > 0.07) c += 22; }
+  else c -= 0.35;
+  if (x * x + z * z > 8.5 * 8.5) c += 60;
+  return c;
+}
+
+function pickFertile(world, x, z, radius, out) {
+  // best of 7 random candidate cells within radius; returns fertility, writes the cell centre to out indices
+  const rng = world.rng;
+  let bf = -1, bx = x, bz = z;
+  for (let k = 0; k < 7; k++) {
+    const a = rng.next() * 6.283, r = Math.sqrt(rng.next()) * radius;
+    const cx = x + Math.cos(a) * r, cz = z + Math.sin(a) * r;
+    if (cx * cx + cz * cz > 7.8 * 7.8) continue;
+    const i = cellOf(cx, cz);
+    if (world.water[i] > 0.02) continue;
+    const f = world.fertility[i] * (1 - world.compaction[i] * 0.5);
+    if (f > bf) { bf = f; bx = cx; bz = cz; }
+  }
+  out[0] = bx; out[1] = bz;
+  return bf;
+}
+const tmp2 = new Float32Array(2);
+
+function decide(world, v) {
+  const civ = world.civ, rng = world.rng;
+  const x = civ.vX[v], z = civ.vZ[v], e = civ.vEnergy[v], c = civ.vCargo[v], role = civ.vRole[v];
+  const home = civ.vHome[v];
+  civ.vTimer[v] = 0.6 + rng.next() * 1.0;
+
+  // Mason with an assigned job keeps walking to it
+  if (civ.vJob[v] >= 0) { civ.vState[v] = ST_BUILD; civ.vTX[v] = civ.oX[civ.vJob[v]]; civ.vTZ[v] = civ.oZ[civ.vJob[v]]; return; }
+
+  let bestU = 0.08, bestA = ST_IDLE, tx = x, tz = z;
+
+  // rest
+  if (home >= 0) {
+    const u = (1 - e) * (1 - e) * 1.3;
+    if (u > bestU) { bestU = u; bestA = ST_REST; tx = civ.sX[home]; tz = civ.sZ[home]; }
+  }
+  // haul cargo home
+  if (c > 0.2) {
+    const d = nearestDwelling(civ, x, z, true);
+    if (d >= 0) { const u = c * (role === ROLE_HAULER ? 1.25 : 1.0); if (u > bestU) { bestU = u; bestA = ST_HAUL; tx = civ.sX[d]; tz = civ.sZ[d]; civ.vAux[v] = d; } }
+  }
+  // forage fertile ground
+  if (c < 0.7 && e > 0.15) {
+    const f = pickFertile(world, x, z, 3.2, tmp2);
+    if (f > 0.3) {
+      const w = role === ROLE_FORAGER ? 1.0 : role === ROLE_HAULER ? 0.85 : 0.45;
+      const u = (1 - c) * (0.35 + 0.65 * e) * f * w * 1.1;
+      if (u > bestU) { bestU = u; bestA = ST_FORAGE; tx = tmp2[0]; tz = tmp2[1]; }
+    }
+  }
+  // migrate away from a barren or ruined home
+  if (home >= 0) {
+    const hf = sampleGrid(world.fertility, civ.sX[home], civ.sZ[home]);
+    if (civ.sDecay[home] > 0.5 || hf < TUNING.ruinFertility) {
+      const d = nearestHealthyOther(civ, home);
+      if (d >= 0 && 1.0 > bestU) { bestU = 1.0; bestA = ST_MIGRATE; tx = civ.sX[d]; tz = civ.sZ[d]; civ.vAux[v] = d; }
+    }
+  }
+  // processions to the nearest monolith
+  const mono = nearestMonolith(world, x, z);
+  if (mono >= 0) {
+    const bias = sampleGrid(world.culturalBias, x, z);
+    const u = role === ROLE_MYSTIC ? 0.95 : 0.2 + 0.35 * Math.max(0, bias);
+    if (u > bestU) {
+      const a = rng.next() * 6.283;
+      bestU = u; bestA = ST_PROCESSION;
+      tx = world.monoliths[mono * 4] + Math.cos(a) * 0.75; tz = world.monoliths[mono * 4 + 1] + Math.sin(a) * 0.75; civ.vAux[v] = mono;
+    }
+  }
+  // mystics wander out to re-consecrate ruins
+  if (role === ROLE_MYSTIC) {
+    let ruin = -1, bd = 1e9;
+    for (let s = 0; s < civ.nS; s++) {
+      if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] < 0.6) continue;
+      const dx = civ.sX[s] - x, dz = civ.sZ[s] - z, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; ruin = s; }
+    }
+    if (ruin >= 0 && 0.9 > bestU) { bestU = 0.9; bestA = ST_CONSECRATE; tx = civ.sX[ruin]; tz = civ.sZ[ruin]; civ.vAux[v] = ruin; }
+  }
+  civ.vState[v] = bestA;
+  civ.vTX[v] = tx; civ.vTZ[v] = tz;
+}
+
+function nearestHealthyOther(civ, home) {
+  let best = -1, bd = 1e9;
+  for (let s = 0; s < civ.nS; s++) {
+    if (s === home || civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1 || civ.sDecay[s] > 0.3) continue;
+    const dx = civ.sX[s] - civ.sX[home], dz = civ.sZ[s] - civ.sZ[home], d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+
+function arrive(world, v) {
+  const civ = world.civ;
+  const st = civ.vState[v];
+  if (st === ST_FORAGE) {
+    civ.vCargo[v] = Math.min(1, civ.vCargo[v] + 0.35);
+    const i = cellOf(civ.vX[v], civ.vZ[v]);
+    world.fertility[i] = Math.max(0, world.fertility[i] - 0.01);
+  } else if (st === ST_HAUL) {
+    civ.food += civ.vCargo[v] * 10;
+    civ.vCargo[v] = 0;
+    civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.15);
+  } else if (st === ST_REST) {
+    civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.5);
+  } else if (st === ST_MIGRATE) {
+    if (civ.vAux[v] >= 0) civ.vHome[v] = civ.vAux[v];
+  } else if (st === ST_CONSECRATE) {
+    const s = civ.vAux[v];
+    if (s >= 0 && civ.sDecay[s] > 0.4) { reviveStructure(world, s); }
+  } else if (st === ST_PROCESSION) {
+    civ.vTimer[v] = 2.5 + world.rng.next() * 2;
+    civ.lanternClock += 0;
+    if (world.rng.next() < 0.45) emitEvent(world.events, EV_LANTERN, civ.vX[v], civ.vZ[v], 1);
+  }
+  civ.vState[v] = ST_IDLE;
+}
+
+export function reviveStructure(world, s) {
+  const civ = world.civ;
+  civ.sDecay[s] = 0; civ.sLum[s] = 1; civ.revived++;
+  emitEvent(world.events, EV_REVIVE, civ.sX[s], civ.sZ[s], 1);
+}
+
+function moveVillager(world, v, dt) {
+  const civ = world.civ;
+  const x = civ.vX[v], z = civ.vZ[v];
+  const dx = civ.vTX[v] - x, dz = civ.vTZ[v] - z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+  const st = civ.vState[v];
+  if (st === ST_IDLE || st === ST_GREET) { civ.vVX[v] *= 0.8; civ.vVZ[v] *= 0.8; return dist; }
+  if (dist < 0.12) { civ.vVX[v] = 0; civ.vVZ[v] = 0; return dist; }
+  const dirx = dx / dist, dirz = dz / dist;
+  // five candidate headings, lowest local cost + remaining distance wins (gradient descent on the cost field)
+  let bestC = 1e9, bx = dirx, bz = dirz;
+  for (let k = 0; k < 5; k++) {
+    const hx = dirx * HEAD_COS[k] - dirz * HEAD_SIN[k], hz = dirx * HEAD_SIN[k] + dirz * HEAD_COS[k];
+    const nx = x + hx * 0.38, nz = z + hz * 0.38;
+    const rx = civ.vTX[v] - nx, rz = civ.vTZ[v] - nz;
+    const cst = stepCost(world, nx, nz) + Math.sqrt(rx * rx + rz * rz) * 2.0 + (k === 0 ? 0 : 0.15);
+    if (cst < bestC) { bestC = cst; bx = hx; bz = hz; }
+  }
+  const i = cellOf(x, z);
+  const slope = slopeAtCell(world.elev, i);
+  const wet = world.water[i] > 0.025 && world.engCover[i] === 0;
+  let speed = TUNING.walkSpeed / (1 + slope * TUNING.slopePenalty);
+  if (world.engCover[i] !== 0) speed *= 1.4;
+  if (wet) speed *= 0.5;
+  if (civ.vCargo[v] > 0.3) speed *= 0.88;
+  civ.vVX[v] += (bx * speed - civ.vVX[v]) * Math.min(1, dt * 6);
+  civ.vVZ[v] += (bz * speed - civ.vVZ[v]) * Math.min(1, dt * 6);
+  civ.vX[v] = x + civ.vVX[v] * dt;
+  civ.vZ[v] = z + civ.vVZ[v] * dt;
+  civ.vPhase[v] += speed * dt * 9;
+  civ.vEnergy[v] = Math.max(0, civ.vEnergy[v] - 0.012 * dt);
+
+  // footfall: wear the path, and frustration where the way is steep or wet and nobody has built anything
+  const c = world.compaction[i] + 0.05 * dt;
+  world.compaction[i] = c > 1 ? 1 : c;
+  if ((slope > TUNING.steepSlope || world.water[i] > 0.025) && world.engCover[i] === 0) {
+    const f = world.frustration[i] + TUNING.frustrateRate * dt;
+    world.frustration[i] = f > 1 ? 1 : f;
+  }
+  return dist;
+}
+
+function startOrder(world, i, kind, x, z, dirX, dirZ, len) {
+  const civ = world.civ;
+  civ.oKind[i] = kind; civ.oState[i] = 1; civ.oX[i] = x; civ.oZ[i] = z; civ.oDirX[i] = dirX; civ.oDirZ[i] = dirZ; civ.oLen[i] = len;
+  civ.oProg[i] = 0; civ.oWorker[i] = -1; civ.oStruct[i] = -1; civ.oDust[i] = 0;
+}
+
+function scanForOrders(world) {
+  const civ = world.civ, rng = world.rng;
+  let free = -1, open = 0;
+  for (let o = 0; o < MAX_ORDERS; o++) { if (civ.oState[o] === 0) { if (free < 0) free = o; } else open++; }
+  if (free < 0 || open >= 6) return;
+  let bestI = -1, bestF = TUNING.orderThreshold;
+  for (let k = 0; k < 140; k++) {
+    const i = (rng.next() * (GRID_W * GRID_H)) | 0;
+    if (world.mask[i] === 1) continue;
+    const f = world.frustration[i];
+    if (f > bestF && world.engCover[i] === 0) { bestF = f; bestI = i; }
+  }
+  if (bestI < 0) return;
+  const gx = bestI % GRID_W, gz = (bestI / GRID_W) | 0;
+  const x = -10 + (gx + 0.5) * CELL_SIZE, z = -10 + (gz + 0.5) * CELL_SIZE;
+  for (let o = 0; o < MAX_ORDERS; o++) {
+    if (civ.oState[o] === 0) continue;
+    const dx = civ.oX[o] - x, dz = civ.oZ[o] - z;
+    if (dx * dx + dz * dz < 1.4 * 1.4) return;
+  }
+  const wet = world.water[bestI] > 0.025;
+  const slope = slopeAtCell(world.elev, bestI);
+  if (wet) {
+    // span across the flow: perpendicular to the local velocity (fall back to the water-surface gradient)
+    let fx = world.vx[bestI], fz = world.vz[bestI];
+    let m = Math.sqrt(fx * fx + fz * fz);
+    if (m < 0.05) {
+      const l = world.elev[bestI - 1] + world.water[bestI - 1], r = world.elev[bestI + 1] + world.water[bestI + 1];
+      const u = world.elev[bestI - GRID_W] + world.water[bestI - GRID_W], d = world.elev[bestI + GRID_W] + world.water[bestI + GRID_W];
+      fx = -(r - l); fz = -(d - u); m = Math.sqrt(fx * fx + fz * fz);
+    }
+    if (m < 1e-6) { fx = 1; fz = 0; m = 1; }
+    const dirX = -fz / m, dirZ = fx / m;
+    // measure the wet width along dirX/dirZ
+    let half = 0.3;
+    for (let s = 0; s < 12; s++) {
+      const px = x + dirX * (0.1 + s * 0.1), pz = z + dirZ * (0.1 + s * 0.1), mx = x - dirX * (0.1 + s * 0.1), mz = z - dirZ * (0.1 + s * 0.1);
+      const wp = world.water[cellOf(px, pz)], wm = world.water[cellOf(mx, mz)];
+      if (wp > 0.012 || wm > 0.012) half = 0.1 + s * 0.1 + 0.25;
+    }
+    startOrder(world, free, KIND_BRIDGE, x, z, dirX, dirZ, Math.min(2.4, half * 2 + 0.3));
+  } else if (slope > TUNING.steepSlope) {
+    const l = world.elev[bestI - 1], r = world.elev[bestI + 1], u = world.elev[bestI - GRID_W], d = world.elev[bestI + GRID_W];
+    let gxs = r - l, gzs = d - u; const m = Math.sqrt(gxs * gxs + gzs * gzs) || 1;
+    startOrder(world, free, KIND_STEPS, x, z, -gxs / m, -gzs / m, 1.1);
+  } else if (world.compaction[bestI] > 0.5) {
+    startOrder(world, free, KIND_PAVING, x, z, 1, 0, 0.7);
+  }
+}
+
+function assignOrders(world) {
+  const civ = world.civ;
+  for (let o = 0; o < MAX_ORDERS; o++) {
+    if (civ.oState[o] !== 1) continue;
+    let best = -1, bd = 1e9;
+    for (let v = 0; v < civ.nV; v++) {
+      if (civ.vRole[v] !== ROLE_MASON || civ.vJob[v] >= 0) continue;
+      const dx = civ.vX[v] - civ.oX[o], dz = civ.vZ[v] - civ.oZ[o], d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = v; }
+    }
+    if (best < 0 && civ.masons < TUNING.maxMasons) {
+      for (let v = 0; v < civ.nV; v++) {
+        if (civ.vRole[v] === ROLE_MASON || civ.vRole[v] === ROLE_MYSTIC || civ.vJob[v] >= 0 || civ.vCargo[v] > 0.3) continue;
+        const dx = civ.vX[v] - civ.oX[o], dz = civ.vZ[v] - civ.oZ[o], d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; best = v; }
+      }
+      if (best >= 0) { civ.vRole[best] = ROLE_MASON; civ.masons++; }
+    }
+    if (best < 0) continue;
+    civ.oState[o] = 2; civ.oWorker[o] = best; civ.vJob[best] = o;
+    civ.vState[best] = ST_BUILD; civ.vTX[best] = civ.oX[o]; civ.vTZ[best] = civ.oZ[o];
+  }
+}
+
+function progressBuilds(world, dt) {
+  const civ = world.civ;
+  for (let o = 0; o < MAX_ORDERS; o++) {
+    const st = civ.oState[o];
+    if (st !== 2 && st !== 3) continue;
+    const w = civ.oWorker[o];
+    if (w < 0) { civ.oState[o] = 0; continue; }
+    const dx = civ.vX[w] - civ.oX[o], dz = civ.vZ[w] - civ.oZ[o];
+    if (st === 2) {
+      if (dx * dx + dz * dz < 0.2 * 0.2) {
+        const s = addStructure(civ, civ.oKind[o], civ.oX[o], civ.oZ[o], 0, 0, civ.oDirX[o], civ.oDirZ[o], civ.oLen[o]);
+        if (s < 0) { civ.oState[o] = 0; civ.vJob[w] = -1; civ.oWorker[o] = -1; continue; }
+        civ.oStruct[o] = s; civ.oState[o] = 3; civ.vState[w] = ST_IDLE; civ.vTimer[w] = 99;
+      }
+      continue;
+    }
+    civ.vState[w] = ST_IDLE; civ.vTimer[w] = 99; civ.vVX[w] = 0; civ.vVZ[w] = 0;
+    civ.oProg[o] += dt / TUNING.buildTime;
+    civ.sBuild[civ.oStruct[o]] = civ.oProg[o] > 1 ? 1 : civ.oProg[o];
+    civ.oDust[o] -= dt;
+    if (civ.oDust[o] <= 0) { civ.oDust[o] = 0.4; emitEvent(world.events, EV_DUST, civ.oX[o] + (world.rng.next() - 0.5) * 0.3, civ.oZ[o] + (world.rng.next() - 0.5) * 0.3, 1); }
+    if (civ.oProg[o] >= 1) completeOrder(world, o);
+  }
+}
+
+function completeOrder(world, o) {
+  const civ = world.civ;
+  const s = civ.oStruct[o], kind = civ.oKind[o];
+  civ.sBuild[s] = 1;
+  const radius = kind === KIND_PAVING ? 0.4 : 0.2;
+  markCoverFor(world, civ.oX[o], civ.oZ[o], civ.oDirX[o], civ.oDirZ[o], kind === KIND_PAVING ? 0.5 : civ.oLen[o], radius, kind);
+  civ.built++; if (kind === KIND_BRIDGE) civ.bridges++;
+  emitEvent(world.events, EV_BUILD_DONE, civ.oX[o], civ.oZ[o], kind);
+  if (kind === KIND_BRIDGE && !civ.mythFirstBridge) { civ.mythFirstBridge = true; emitEvent(world.events, EV_MYTH, civ.oX[o], civ.oZ[o], 1); }
+  const w = civ.oWorker[o];
+  civ.vJob[w] = -1; civ.vTimer[w] = 0.3; civ.vState[w] = ST_IDLE;
+  civ.oState[o] = 0; civ.oWorker[o] = -1; civ.oStruct[o] = -1;
+}
+
+function markCoverFor(world, x, z, dirX, dirZ, len, radius, kind) {
+  const steps = Math.max(1, Math.ceil(len / (CELL_SIZE * 0.5)));
+  const rc = Math.max(1, Math.ceil(radius / CELL_SIZE));
+  for (let k = 0; k <= steps; k++) {
+    const t = (k / steps - 0.5) * len;
+    const gx = Math.round(worldToGridX(x + dirX * t)), gz = Math.round(worldToGridZ(z + dirZ * t));
+    for (let dz = -rc; dz <= rc; dz++) {
+      for (let dx = -rc; dx <= rc; dx++) {
+        const X = gx + dx, Z = gz + dz;
+        if (X < 0 || Z < 0 || X >= GRID_W || Z >= GRID_H) continue;
+        world.engCover[Z * GRID_W + X] = kind;
+      }
+    }
+  }
+}
+
+function secondTick(world) {
+  const civ = world.civ;
+  // ruins: dwellings in barren ground slump; luminescence fades unless a monolith sustains it
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1) continue;
+    const f = sampleGrid(world.fertility, civ.sX[s], civ.sZ[s]);
+    if (f < TUNING.ruinFertility) civ.sDecay[s] = Math.min(1, civ.sDecay[s] + TUNING.ruinRate);
+    else if (civ.sDecay[s] < 1 && f > 0.4) civ.sDecay[s] = Math.max(0, civ.sDecay[s] - 0.012);
+    civ.sLum[s] = Math.max(0, civ.sLum[s] - 0.05);
+    civ.sBias[s] = sampleGrid(world.culturalBias, civ.sX[s], civ.sZ[s]);
+  }
+  // monoliths revive nearby ruins
+  const m = world.monoliths;
+  for (let k = 0; k < 8; k++) {
+    if (m[k * 4 + 3] === 0) continue;
+    for (let s = 0; s < civ.nS; s++) {
+      if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] < 0.3) continue;
+      const dx = civ.sX[s] - m[k * 4], dz = civ.sZ[s] - m[k * 4 + 1];
+      if (dx * dx + dz * dz < 2.8 * 2.8) reviveStructure(world, s);
+    }
+  }
+  // cultural drift: engineering pushes toward Industrious, tilled land toward Pastoral
+  for (let s = 0; s < civ.nS; s++) {
+    const k = civ.sKind[s];
+    if (k === KIND_BRIDGE || k === KIND_STEPS || k === KIND_PAVING) nudgeBias(world, civ.sX[s], civ.sZ[s], 2.0, -1, 0.05);
+    else if (k === KIND_DWELLING && civ.sBuild[s] >= 1 && civ.sDecay[s] < 0.5) nudgeBias(world, civ.sX[s], civ.sZ[s], 1.6, 0, 0.02);
+  }
+  // growth: spend stored food on a new dwelling in fertile ground near the busiest part of the settlement
+  if (civ.food >= TUNING.foodPerDwelling && civ.dwellings < TUNING.dwellingCap) {
+    const rng = world.rng;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const base = (rng.next() * civ.nS) | 0;
+      if (civ.sKind[base] !== KIND_DWELLING || civ.sDecay[base] > 0.4) continue;
+      const a = rng.next() * 6.283, r = 1.2 + rng.next() * 1.8;
+      const x = civ.sX[base] + Math.cos(a) * r, z = civ.sZ[base] + Math.sin(a) * r;
+      if (!siteOk(world, x, z, 1.3 * 1.3, 0.5)) continue;
+      const s = addStructure(civ, KIND_DWELLING, x, z, sampleGrid(world.culturalBias, x, z), 0, 0, 1, 0);
+      if (s >= 0) { civ.sRot[s] = rng.next() * 6.283; civ.food -= TUNING.foodPerDwelling * 0.7; civ.sBuild[s] = 0.02; }
+      break;
+    }
+  }
+  // dwellings under construction by the community rise on their own
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sKind[s] === KIND_DWELLING && civ.sBuild[s] > 0 && civ.sBuild[s] < 1) civ.sBuild[s] = Math.min(1, civ.sBuild[s] + 0.08);
+  }
+}
+
+function nudgeBias(world, x, z, radius, target, rate) {
+  const gx = worldToGridX(x), gz = worldToGridZ(z);
+  const rc = Math.ceil(radius / CELL_SIZE);
+  const x0 = Math.max(0, Math.floor(gx - rc)), x1 = Math.min(GRID_W - 1, Math.ceil(gx + rc));
+  const z0 = Math.max(0, Math.floor(gz - rc)), z1 = Math.min(GRID_H - 1, Math.ceil(gz + rc));
+  const r2 = radius * radius;
+  for (let zz = z0; zz <= z1; zz++) {
+    for (let xx = x0; xx <= x1; xx++) {
+      const dx = (xx - gx) * CELL_SIZE, dz = (zz - gz) * CELL_SIZE, d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      const i = zz * GRID_W + xx;
+      world.culturalBias[i] += (target - world.culturalBias[i]) * rate * (1 - d2 / r2);
+    }
+  }
+}
+
+// React to sim events that villagers care about (wind chimes: greet).
+function readEvents(world) {
+  const civ = world.civ;
+  let k;
+  while ((k = nextEvent(world.events, civ.eventCursor)) >= 0) {
+    if (world.events.type[k] !== EV_CHIME) continue;
+    const cx = world.events.x[k], cz = world.events.z[k];
+    let greeted = 0;
+    for (let v = 0; v < civ.nV && greeted < 6; v++) {
+      const dx = civ.vX[v] - cx, dz = civ.vZ[v] - cz;
+      if (dx * dx + dz * dz < 2.6 * 2.6 && civ.vJob[v] < 0) {
+        civ.vState[v] = ST_GREET; civ.vTimer[v] = 1.6;
+        civ.vHeading[v] = Math.atan2(dx * -1, dz * -1);
+        greeted++;
+      }
+    }
+    if (greeted > 0) emitEvent(world.events, EV_GREET, cx, cz, greeted);
+  }
+}
+
+export function civStep(world, dt) {
+  const civ = world.civ;
+  if (civ.dwellings === 0) return;
+  readEvents(world);
+  for (let v = 0; v < civ.nV; v++) {
+    civ.vTimer[v] -= dt;
+    if (civ.vState[v] === ST_GREET) { if (civ.vTimer[v] <= 0) civ.vState[v] = ST_IDLE; continue; }
+    if (civ.vTimer[v] <= 0) decide(world, v);
+    const dist = moveVillager(world, v, dt);
+    const st = civ.vState[v];
+    if (st !== ST_IDLE && st !== ST_BUILD && dist < 0.14) arrive(world, v);
+    if (civ.vVX[v] * civ.vVX[v] + civ.vVZ[v] * civ.vVZ[v] > 1e-4) {
+      const h = Math.atan2(civ.vVX[v], civ.vVZ[v]);
+      let dh = h - civ.vHeading[v];
+      while (dh > Math.PI) dh -= 6.2832;
+      while (dh < -Math.PI) dh += 6.2832;
+      civ.vHeading[v] += dh * Math.min(1, dt * 8);
+    }
+  }
+  civ.orderClock += dt;
+  if (civ.orderClock > 0.7) { civ.orderClock = 0; scanForOrders(world); }
+  assignOrders(world);
+  progressBuilds(world, dt);
+  civ.secClock += dt;
+  if (civ.secClock >= 1) { civ.secClock = 0; secondTick(world); }
+}

@@ -46,6 +46,23 @@ export const TUNING = Object.freeze({
   monolithPulseEvery: 6.0,
   steepSlope: 0.035,      // per-cell elevation gradient that counts as steep
 
+  // civilization
+  villagers: 120,
+  structureCap: 600,
+  dwellingCap: 40,
+  startDwellings: 14,
+  walkSpeed: 0.55,         // world units/s
+  slopePenalty: 10,        // speed divisor: 1 + slope * this
+  frustrateRate: 0.7,      // frustration/s added per villager standing on a steep or wet uncovered cell
+  frustrateDecay: 0.01,    // 1/s everywhere
+  coverDecay: 0.2,         // 1/s on cells under a bridge / steps / paving
+  orderThreshold: 0.45,    // frustration that summons a Mason
+  buildTime: 6.0,          // s
+  maxMasons: 14,
+  ruinFertility: 0.22,
+  ruinRate: 0.045,         // decay/s when local fertility is below ruinFertility
+  foodPerDwelling: 55,
+
   // island shape
   rimRadius: 0.92,
   taperStart: 0.5,

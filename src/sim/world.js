@@ -2,6 +2,8 @@ import { TUNING } from './tuning.js';
 import { generateIsland } from './island.js';
 import { GRID_N } from './grid.js';
 import { createEventRing } from './events.js';
+import { Rng } from './rng.js';
+import { createCiv } from './civ.js';
 
 
 // All simulation state, allocated once (spec 3.1).
@@ -22,6 +24,9 @@ export function createWorld(seed) {
     events: createEventRing(),
     monoliths: new Float32Array(8 * 4),   // x, z, placedAt, active
     monoPulse: new Float32Array(8),
+    rng: new Rng(((seed === undefined ? TUNING.seedDefault : seed) ^ 0x5bd1e995) >>> 0),
+    engCover: new Uint8Array(GRID_N),     // 0 none, 2 bridge, 3 steps, 4 paving
+    civ: null,
     springs: new Int32Array(TUNING.springCount),
     rimCells: null,
     params: {
@@ -34,5 +39,6 @@ export function createWorld(seed) {
     stats: { rimDrained: 0, flux: 0, substeps: 0, time: 0 },
   };
   generateIsland(world);
+  world.civ = createCiv();
   return world;
 }

@@ -6,6 +6,7 @@ import { simStep } from '../src/sim/sim.js';
 import { ecologyStep } from '../src/sim/ecology.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { Rng } from '../src/sim/rng.js';
+import { seedCivilization, civStep, KIND_BRIDGE, KIND_DWELLING, ROLE_MYSTIC, ST_BUILD } from '../src/sim/civ.js';
 import { sculptAt, rainAt, placeMonolith, monolithEffects, MAX_MONOLITHS } from '../src/sim/tools.js';
 import { sampleGrid, visualHeight, raymarchHeightfield } from '../src/sim/sample.js';
 import { nextEvent, EV_MONOLITH_PLACE, EV_MONOLITH_PULSE } from '../src/sim/events.js';
@@ -204,6 +205,106 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   check('long run: standing water reaches equilibrium (<15% change over the next 300 sim s)', Math.abs(w2 - w1) / w1 < 0.15, `${w1.toFixed(0)} -> ${w2.toFixed(0)}`);
   check('long run: land does not inflate (<2% change over 300 sim s)', Math.abs(e2 - e1) / e1 < 0.02, `${e1.toFixed(0)} -> ${e2.toFixed(0)}`);
   check('long run: island is not flooded (<35% of land wet)', wet / cells < 0.35, `${(wet / cells * 100).toFixed(1)}%`);
+}
+
+// 5e. civilization
+{
+  const mk = (seed) => { const w = createWorld(seed); prewarm(w); seedCivilization(w); return w; };
+  const w = mk(1337);
+  const c = w.civ;
+  check('civ: founding dwellings and 120 villagers', c.dwellings >= 8 && c.nV === 120, `${c.dwellings} dwellings`);
+  let inside = true, deep = 0;
+  for (let v = 0; v < c.nV; v++) { if (Math.hypot(c.vX[v], c.vZ[v]) > 8.4) inside = false; if (w.water[Math.round((c.vZ[v] + 10) / 20 * 128 - 0.5) * 128 + Math.round((c.vX[v] + 10) / 20 * 128 - 0.5)] > 0.07) deep++; }
+  check('civ: villagers start on dry land inside the island', inside && deep === 0, `deep ${deep}`);
+
+  // determinism
+  const a = mk(77), b = mk(77);
+  for (let i = 0; i < 1500; i++) { simStep(a); simStep(b); }
+  check('civ: deterministic from the same seed', bytesEqual(a.civ.vX, b.civ.vX) && bytesEqual(a.civ.vZ, b.civ.vZ) && a.civ.food === b.civ.food && a.civ.built === b.civ.built);
+
+  // zero allocation with everyone walking
+  const z = mk(5);
+  for (let i = 0; i < 600; i++) simStep(z);
+  global.gc();
+  const h0 = process.memoryUsage().heapUsed;
+  for (let i = 0; i < 1200; i++) simStep(z);
+  global.gc();
+  const grew = process.memoryUsage().heapUsed - h0;
+  check('zero-GC: simStep with the full civilization does not grow the heap', grew < 256 * 1024, `${(grew / 1024).toFixed(1)} KB`);
+
+  // villagers should actually move and keep to land
+  let moved = 0, wild = 0;
+  for (let v = 0; v < c.nV; v++) { const x0 = c.vX[v], z0 = c.vZ[v]; void x0; void z0; }
+  const w2 = mk(1337); const sx = Float32Array.from(w2.civ.vX), sz = Float32Array.from(w2.civ.vZ);
+  for (let i = 0; i < 2400; i++) simStep(w2);
+  for (let v = 0; v < 120; v++) { if (Math.hypot(w2.civ.vX[v] - sx[v], w2.civ.vZ[v] - sz[v]) > 0.5) moved++; if (Math.hypot(w2.civ.vX[v], w2.civ.vZ[v]) > 8.9) wild++; }
+  check('civ: most villagers go about their business (60 sim s)', moved > 70 && wild === 0, `${moved}/120 moved, ${wild} off-island`);
+
+  // Mason dispatch: frustration on a river cell summons a Mason who builds a bridge
+  const wb = mk(1337);
+  let river = -1;
+  for (let i = 0; i < GRID_N; i++) { const x = i % 128, zz = (i / 128) | 0; if (x > 20 && x < 108 && zz > 20 && zz < 108 && wb.water[i] > 0.04 && wb.mask[i] === 0 && Math.hypot(wb.vx[i], wb.vz[i]) > 0.3) { river = i; break; } }
+  check('civ test setup: found a river cell', river >= 0);
+  if (river >= 0) {
+    wb.frustration[river] = 0.9;
+    const tb0 = wb.stats.time;
+    let tOrder = -1, tDone = -1;
+    for (let i = 0; i < 20 * 40 && tDone < 0; i++) {
+      wb.frustration[river] = Math.max(wb.frustration[river], 0.9 * (wb.civ.built === 0 ? 1 : 0));
+      simStep(wb);
+      if (tOrder < 0) for (let o = 0; o < 12; o++) if (wb.civ.oState[o] > 0) tOrder = wb.stats.time;
+      if (wb.civ.bridges > 0 || wb.civ.built > 0) tDone = wb.stats.time;
+    }
+    check('civ: a Mason is dispatched within 3 s of frustration', tOrder >= 0 && tOrder - tb0 < 3, `order after ${(tOrder - tb0).toFixed(1)} sim s`);
+    check('civ: the structure is built and covers the crossing', tDone >= 0 && wb.civ.built > 0, `built ${wb.civ.built}`);
+    let cover = 0; for (let i = 0; i < GRID_N; i++) if (wb.engCover[i] !== 0) cover++;
+    check('civ: completed structure marks cells as covered (cheaper to cross)', cover > 2, `${cover} cells`);
+  }
+
+  // localized traffic summons a Mason within ~10 s
+  const wt = mk(1337);
+  let rc = -1;
+  for (let i = 0; i < GRID_N; i++) { const x = i % 128, zz = (i / 128) | 0; if (x > 25 && x < 100 && zz > 25 && zz < 100 && wt.water[i] > 0.035 && wt.water[i - 3] < 0.003 && wt.water[i + 3] < 0.02) { rc = i; break; } }
+  if (rc < 0) { for (let i = 0; i < GRID_N; i++) { const x = i % 128, zz = (i / 128) | 0; if (x > 25 && x < 100 && zz > 25 && zz < 100 && wt.water[i] > 0.03 && wt.mask[i] === 0) { rc = i; break; } } }
+  if (rc >= 0) {
+    const cx = -10 + ((rc % 128) + 0.5) * 20 / 128, cz = -10 + (((rc / 128) | 0) + 0.5) * 20 / 128;
+    const walkers = 14;
+    for (let v = 0; v < walkers; v++) { wt.civ.vX[v] = cx - 0.5 + (v % 3) * 0.1; wt.civ.vZ[v] = cz + (v % 5) * 0.05; wt.civ.vRole[v] = 0; wt.civ.vTimer[v] = 1e9; wt.civ.vState[v] = 1; wt.civ.vTX[v] = cx + 0.5; wt.civ.vTZ[v] = cz; }
+    const tt0 = wt.stats.time;
+    let tFirst = -1;
+    for (let i = 0; i < 40 * 40 && tFirst < 0; i++) {
+      for (let v = 0; v < walkers; v++) { const dxx = wt.civ.vTX[v] - wt.civ.vX[v]; if (Math.abs(dxx) < 0.15) { wt.civ.vTX[v] = cx + (dxx > 0 ? -0.5 : 0.5); } wt.civ.vTimer[v] = 1e9; wt.civ.vState[v] = 1; }
+      simStep(wt);
+      for (let o = 0; o < 12; o++) if (wt.civ.oState[o] > 0 && tFirst < 0) tFirst = wt.stats.time;
+    }
+    check('civ: localized traffic dispatches a Mason within ~10 s', tFirst >= 0 && tFirst - tt0 < 10, `first order after ${(tFirst - tt0).toFixed(1)} sim s`);
+  } else check('civ test setup: found a wading spot', false);
+
+  // ruins and re-consecration
+  const wr = mk(1337);
+  const target = 0;
+  for (let i = 0; i < GRID_N; i++) { const dx = (i % 128 + 0.5) / 128 * 20 - 10 - wr.civ.sX[target], dz = (((i / 128) | 0) + 0.5) / 128 * 20 - 10 - wr.civ.sZ[target]; if (dx * dx + dz * dz < 1.0) { wr.fertility[i] = 0; wr.moisture[i] = 0; } }
+  wr.params.rain = 0; wr.params.springRate = 0;
+  for (let v = 0; v < 120; v++) if (wr.civ.vRole[v] === ROLE_MYSTIC) wr.civ.vRole[v] = 0;   // mystics would re-consecrate it at once
+  const tr0 = wr.stats.time;
+  let ruinT = -1;
+  for (let i = 0; i < 40 * 90 && ruinT < 0; i++) { for (let k = 0; k < 0; k++) void k; simStep(wr); if (wr.civ.sDecay[target] >= 0.99) ruinT = wr.stats.time; if (i % 4 === 0) { const sx0 = wr.civ.sX[target], sz0 = wr.civ.sZ[target]; for (let j = 0; j < GRID_N; j++) { const dx = (j % 128 + 0.5) / 128 * 20 - 10 - sx0, dz = (((j / 128) | 0) + 0.5) / 128 * 20 - 10 - sz0; if (dx * dx + dz * dz < 1.0) wr.fertility[j] = 0; } } }
+  check('civ: a dwelling in barren ground decays into a ruin', ruinT >= 0, `ruin after ${(ruinT - tr0).toFixed(0)} sim s`);
+  const before = wr.civ.revived;
+  placeMonolith(wr, wr.civ.sX[target] + 0.8, wr.civ.sZ[target]);
+  let minDecay = 1;
+  for (let i = 0; i < 40 * 8; i++) { simStep(wr); minDecay = Math.min(minDecay, wr.civ.sDecay[target]); }
+  check('civ: a monolith re-consecrates the ruin (decay reset, revival counted)', minDecay < 0.05 && wr.civ.revived > before, `lowest decay ${minDecay.toFixed(2)}, revivals ${wr.civ.revived - before}`);
+
+  // mystics process to a monolith and release lanterns
+  const wm = mk(1337);
+  const cur = { i: wm.events.head };
+  placeMonolith(wm, 1.0, 1.0);
+  let near = 0, lanterns = 0;
+  for (let i = 0; i < 40 * 40; i++) simStep(wm);
+  for (let v = 0; v < 120; v++) if (wm.civ.vRole[v] === ROLE_MYSTIC && Math.hypot(wm.civ.vX[v] - 1, wm.civ.vZ[v] - 1) < 2.0) near++;
+  let kk; while ((kk = nextEvent(wm.events, cur)) >= 0) if (wm.events.type[kk] === 6) lanterns++;
+  check('civ: mystics gather at a monolith and launch sky-lanterns', near >= 6 && lanterns >= 2, `${near} mystics nearby, ${lanterns} lanterns`);
 }
 
 // 6. prewarm produces a believable island

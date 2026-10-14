@@ -4,7 +4,7 @@ import { GRID_W, GRID_H, GRID_N } from './grid.js';
 // Soil moisture, crop/humus fertility, footpath relaxation and cultural drift (spec 3.3). Allocation-free.
 export function ecologyStep(world, dt) {
   const p = world.params;
-  const { elev, water, moisture, fertility, compaction, culturalBias, mask, ecoTmp } = world;
+  const { elev, water, moisture, fertility, compaction, culturalBias, mask, ecoTmp, frustration, engCover } = world;
   const absorb = Math.min(1, TUNING.moistAbsorb * dt);
   const evap = TUNING.moistEvap * dt * p.evapMul;
   const rainGain = p.rain * dt * TUNING.moistFromRain;
@@ -12,6 +12,7 @@ export function ecologyStep(world, dt) {
   const decay = TUNING.fertDecay * dt;
   const cdecay = TUNING.fertCompactDecay * dt;
   const relax = TUNING.compactRelax * dt;
+  const fDecay = TUNING.frustrateDecay * dt, fCover = TUNING.coverDecay * dt;
 
   for (let i = 0; i < GRID_N; i++) {
     if (mask[i] === 1) { moisture[i] = 0; fertility[i] = 0; compaction[i] = 0; continue; }
@@ -27,7 +28,10 @@ export function ecologyStep(world, dt) {
     let f = fertility[i];
     f += grow * m * (1 - f) * (1 - c) - decay * (1 - m) * f - cdecay * c * f;
     fertility[i] = f > 1 ? 1 : f < 0 ? 0 : f;
-    compaction[i] = c > relax ? c - relax : 0;
+    const cr = engCover[i] === 4 ? relax * 25 : relax;
+    compaction[i] = c > cr ? c - cr : 0;
+    const fr = frustration[i];
+    if (fr > 0) { const d = engCover[i] !== 0 ? fCover : fDecay; frustration[i] = fr > d ? fr - d : 0; }
   }
 
   // diffusion of moisture and cultural bias (4-neighbour average into scratch, then blend)
