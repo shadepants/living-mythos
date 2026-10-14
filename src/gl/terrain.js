@@ -56,11 +56,11 @@ export function createIslandTop(grid, caps) {
   mat.onBeforeCompile = (shader) => {
     addSimUniforms(shader);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec2 vSimUv;\n${GLSL_SIM}\n${GLSL_TERRAIN_HEIGHT}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;\nvarying vec2 vSimUv;\n${GLSL_SIM}\n${GLSL_TERRAIN_HEIGHT}`)
       .replace('#include <beginnormal_vertex>', GLSL_ISLAND_VERT_NORMAL)
       .replace('#include <begin_vertex>', GLSL_ISLAND_VERT_POS);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec2 vSimUv;\nuniform float uWet;\nuniform vec4 uRingA[8];\nuniform vec4 uRingB[8];\nuniform vec4 uGlow[24];\nuniform float uNight;\n${GLSL_SIM}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;\nvarying vec2 vSimUv;\nuniform float uWet;\nuniform vec4 uRingA[8];\nuniform vec4 uRingB[8];\nuniform vec4 uGlow[24];\nuniform float uNight;\n${GLSL_SIM}`)
       .replace('#include <color_fragment>', GLSL_ISLAND_FRAG_COLOR)
       .replace('#include <roughnessmap_fragment>', GLSL_ISLAND_FRAG_ROUGH)
       .replace('#include <emissivemap_fragment>', GLSL_ISLAND_FRAG_EMISSIVE);

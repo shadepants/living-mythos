@@ -332,11 +332,13 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   let river = -1;
   for (let i = 0; i < GRID_N; i++) { const x = i % 128, zz = (i / 128) | 0; if (x > 20 && x < 108 && zz > 20 && zz < 108 && w.water[i] > 0.04 && w.mask[i] === 0 && Math.hypot(w.vx[i], w.vz[i]) > 0.3) { river = i; break; } }
   const mcur = { i: w.events.head };
-  for (let i = 0; i < 40 * 25 && w.civ.nM === 0; i++) { w.frustration[river] = Math.max(w.frustration[river], w.civ.built === 0 ? 0.9 : 0); simStep(w); }
-  check('myths: the first bridge becomes a myth with a carved stone', w.civ.nM >= 1 && w.civ.mKind[0] === 1 && w.civ.sKind[w.civ.mStruct[0]] === KIND_MYTH, `nM ${w.civ.nM}`);
+  const hasBridgeMyth = () => { for (let k = 0; k < w.civ.nM; k++) if (w.civ.mKind[k] === 1) return k; return -1; };
+  for (let i = 0; i < 40 * 40 && hasBridgeMyth() < 0; i++) { w.frustration[river] = Math.max(w.frustration[river], w.civ.bridges === 0 ? 0.9 : 0); simStep(w); }
+  const bm = hasBridgeMyth();
+  check('myths: the first bridge becomes a myth with a carved stone', bm >= 0 && w.civ.sKind[w.civ.mStruct[bm]] === KIND_MYTH, `nM ${w.civ.nM}, bridges ${w.civ.bridges}`);
   let mythEv = 0, kq; while ((kq = nextEvent(w.events, mcur)) >= 0) if (w.events.type[kq] === 9) mythEv++;
   check('myths: a myth event is emitted for audio and visuals', mythEv >= 1, `${mythEv}`);
-  check('myths: every myth carries a 4-note motif in the scale', (() => { for (let j = 0; j < 4; j++) if (w.civ.mMotif[j] > 6) return false; return true; })());
+  check('myths: every myth carries a 4-note motif in the scale', (() => { for (let j = 0; j < w.civ.nM * 4; j++) if (w.civ.mMotif[j] > 6) return false; return true; })());
   // many myths recycle the oldest stone
   const nsBefore = w.civ.nS;
   for (let k = 0; k < MYTH_MAX + 4; k++) { w.stats.time += 1; recordMyth(w, MYTH_FLOOD, -3 + (k % 5), 2 + (k % 3)); }

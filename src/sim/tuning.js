@@ -59,6 +59,7 @@ export const TUNING = Object.freeze({
   orderThreshold: 0.45,    // frustration that summons a Mason
   buildTime: 6.0,          // s
   maxMasons: 14,
+  maxWorks: 40,            // total bridges / stairs / paving the community will ever build
   ruinFertility: 0.22,
   ruinRate: 0.045,         // decay/s when local fertility is below ruinFertility
   foodPerDwelling: 55,

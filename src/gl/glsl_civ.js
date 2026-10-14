@@ -10,6 +10,7 @@ varying float vDecay;
 varying float vPid;
 varying vec3 vLocalP;
 varying vec3 vLocalN;
+varying vec3 vWN;
 varying float vSeed;
 uniform float uNight;
 bool isPid(float pid, float id) { return abs(pid - id) < 0.5; }
@@ -114,6 +115,7 @@ export const GLSL_STRUCT_POS = /* glsl */`
   vec3 transformed = lp + vec3(0.0, sElev, 0.0);
   vLocalP = position;
   vLocalN = normal;
+  vWN = mat3(instanceMatrix) * normal;
   vSeed = aKind.z;
   vPid = pid;
   vDecay = (kind < 0.5 || kind > 4.5) ? decay : 0.0;
@@ -140,18 +142,20 @@ varying float vDecay;
 varying float vPid;
 varying vec3 vLocalP;
 varying vec3 vLocalN;
+varying vec3 vWN;
 varying float vSeed;
 uniform float uNight;
 `;
 
 export const GLSL_STRUCT_FRAG_COLOR = /* glsl */`
   diffuseColor.rgb = vSCol;
-  vec3 nrmS = normalize(vNormal);
+  vec3 nrmS = normalize(vWN);
+  vec3 nrmL = normalize(vLocalN);
   float mossN = vnoise(vLocalP.xz * 18.0 + vLocalP.y * 9.0);
   float moss = vDecay * smoothstep(0.15, 0.8, mossN * 0.75 + (1.0 - clamp(vLocalP.y / 0.6, 0.0, 1.0)) * 0.35 + nrmS.y * 0.2);
   diffuseColor.rgb = mix(diffuseColor.rgb, lin(vec3(0.20, 0.36, 0.13)), moss * 0.85);
   float winS = 0.0;
-  if (abs(vPid - 1.0) < 0.5) winS = step(abs(fract(vLocalP.x * 7.0 + 0.5) - 0.5), 0.16) * step(abs(vLocalP.y - 0.2), 0.05) * step(0.4, abs(nrmS.z) + abs(nrmS.x));
+  if (abs(vPid - 1.0) < 0.5) winS = step(abs(fract(vLocalP.x * 7.0 + 0.5) - 0.5), 0.16) * step(abs(vLocalP.y - 0.2), 0.05) * step(0.4, abs(nrmL.z) + abs(nrmL.x));
   else if (abs(vPid - 11.0) < 0.5) winS = step(abs(fract(vLocalP.x * 5.0 + 0.5) - 0.5), 0.08) * step(abs(fract(vLocalP.y * 10.0) - 0.5), 0.12) * 0.5;
   float winGlow = winS * (1.0 - vDecay);
 
@@ -243,7 +247,7 @@ void main() {
   float stretch = 1.0;
   float s = size;
   if (type < 0.5) { if (aux > 0.5) s *= 1.0 + lf * 2.0; else stretch = 2.5; }
-  else if (type < 1.5) stretch = 9.0;
+  else if (type < 1.5) stretch = 16.0;
   else if (type < 2.5) { if (aux > 0.5) s *= 1.0 + lf * 1.6; else stretch = 1.7; }
   else if (type > 3.5) stretch = 1.35;
   vec3 helper = abs(dir.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);

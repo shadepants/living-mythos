@@ -42,7 +42,7 @@ export function stepParticles(p, world, dt, time, rainAmt, windAmp, cloudOn, cx,
     } else if (t === EV_DUST) {
       for (let n = 0; n < 4; n++) spawn(p, P_EMBER, ex + (Math.random() - 0.5) * 0.3, ey + 0.05, ez + (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.25, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.25, 1.6, 0.07 + Math.random() * 0.05, 1);
     } else if (t === EV_LANTERN) {
-      spawn(p, P_LANTERN, ex, ey + 0.4, ez, (Math.random() - 0.5) * 0.1, 0.35 + Math.random() * 0.15, (Math.random() - 0.5) * 0.1, 14 + Math.random() * 6, 0.14, Math.random());
+      spawn(p, P_LANTERN, ex, ey + 0.4, ez, (Math.random() - 0.5) * 0.1, 0.35 + Math.random() * 0.15, (Math.random() - 0.5) * 0.1, 14 + Math.random() * 6, 0.16, Math.random());
     } else if (t === EV_MONOLITH_PULSE || t === EV_MONOLITH_PLACE) {
       for (let n = 0; n < 3; n++) { const a = n * 2.09 + time; spawn(p, P_LANTERN, ex + Math.cos(a) * 0.5, ey + 0.8, ez + Math.sin(a) * 0.5, 0, 0.45, 0, 11, 0.12, Math.random()); }
     } else if (t === EV_RAIN_DROP) {
@@ -90,7 +90,7 @@ export function stepParticles(p, world, dt, time, rainAmt, windAmp, cloudOn, cx,
     let x, z, y;
     if (useCloud) { const a = Math.random() * 6.28, r = Math.sqrt(Math.random()) * 1.5; x = cx + Math.cos(a) * r; z = cz + Math.sin(a) * r; y = cy - 0.15; }
     else { const a = Math.random() * 6.28, r = Math.sqrt(Math.random()) * 8.5; x = Math.cos(a) * r; z = Math.sin(a) * r; y = 5.5 + Math.random() * 1.5; }
-    spawn(p, P_RAIN, x, y, z, windAmp * 0.9 + 0.3, -7.5 - Math.random() * 2, 0.15, 2.0, 0.55, 0);
+    spawn(p, P_RAIN, x, y, z, windAmp * 0.9 + 0.3, -7.5 - Math.random() * 2, 0.15, 2.0, 0.02, 0);
     alive++;
   }
   void tx; void tz;

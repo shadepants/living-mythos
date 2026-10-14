@@ -43,7 +43,7 @@ export function createVillagers(caps) {
   mesh.castShadow = false;
   mesh.receiveShadow = true;
 
-  const m = new THREE.Matrix4(), nrm = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3(), pos = new THREE.Vector3();
+  const m = new THREE.Matrix4(), nrm = new THREE.Vector3(), nrmS = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3(), pos = new THREE.Vector3();
   const SCALE = 1.5;
   const sa = state.array;
 
@@ -64,7 +64,8 @@ export function createVillagers(caps) {
       fwd.set(Math.sin(h), 0, Math.cos(h));
       fwd.addScaledVector(nrm, -fwd.dot(nrm)).normalize();
       right.crossVectors(nrm, fwd);
-      m.makeBasis(right.multiplyScalar(SCALE), nrm.clone().multiplyScalar(SCALE), fwd.multiplyScalar(SCALE));
+      nrmS.copy(nrm).multiplyScalar(SCALE);
+      m.makeBasis(right.multiplyScalar(SCALE), nrmS, fwd.multiplyScalar(SCALE));
       pos.set(x, y, z);
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);

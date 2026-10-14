@@ -1,7 +1,7 @@
 # Living Mythos — build notes
 
 ## Status
-- **Current milestone:** M5 done (cursor, 4 tools, dock, touch). Next: M6 villagers/structures/particles. All GL work is compile-verified only; input/tool logic is verified by `npm run interact` (real mouse/touch in headless Chrome). NOTHING has been seen rendered.
+- **Current milestone:** M10 done — every milestone in SPEC.md is implemented. **Nothing has been seen rendered on a real GPU** (headless Chrome's SwiftShader crashes in this PRoot): shaders compile (smoke test: 12 programs, 0 errors) and all logic is tested, but colours, lighting, scale and composition are unverified. First thing to do on the phone: open it, check each atmosphere (Q/W/E), and send screenshots/console output.
 - **Headless Chrome (important):** `~/.cache/ms-playwright/chromium_headless_shell-*` exists; `tools/smoke.mjs`
   drives it via puppeteer-core. SwiftShader's GPU process **segfaults ~1s after the first draw in this PRoot**
   (every flag combo tried), so there are **no screenshots/pixel checks**. But shader compile/link errors and JS
@@ -62,3 +62,22 @@ across all modules (flat scope after inlining; build fails on duplicates); no im
 - Controls: mouse left-hold on island = tool, right/Shift = alt (carve); drag off-island orbits; touch tap = pulse, long-press
   400ms = alt hold, drag = orbit, pinch = zoom. Keys: 1-4 tools, Q/W/E atmosphere, D drift.
 - Weather feeds the sim: monsoon rain x9, golden hour grows crops fastest (set each frame in main.js).
+
+## As built (M6-M10)
+- **Civilization** (`src/sim/civ.js`): 120 villagers (SoA), utility AI (rest/haul/forage/migrate/procession/consecrate/greet/gather),
+  local 5-heading steering on a cost field, footfall compaction + frustration, Masons (order board of 12) build bridges
+  (span across flow, never across lakes), stone steps (stair slabs follow the ground) and lantern paving; max 40 works.
+  Dwellings found themselves from food, ruin in barren ground, mystics/monoliths re-consecrate. Culture drifts: engineering ->
+  Industrious, tilled land -> Pastoral, monoliths -> Mystical. Myths (max 12): carved glyph stones with a 4-note motif,
+  anniversary gatherings every 120 sim s.
+- **Pools**: flora 3500, structures 600 (one parametric mesh, parts shown per archetype in the vertex shader), villagers 120,
+  particles 1000 (+ a 16-puff raincloud). All have `aInstanceState`. Warm light pools (24 emitters) are faked in the terrain shader.
+- **Audio** (`src/audio/`): 16 persistent voices (sine+triangle, optional FM), ping-pong delay, procedural 3.5 s IR, noise bus.
+  Tested with a recording fake context and, in headless Chrome, against the real WebAudio (no errors, notes fire).
+- **Persistence/quality/photo/debug**: autosave 20 s + on hide (`mythos.save.v1`, ~750 KB); tiers low/mid/high with a governor
+  that only steps down; photo mode renders a 2x frame with the UI hidden and downloads a PNG; `?debug=1` adds the dev overlay.
+- Sim previews: `node tools/preview-map.mjs` (found: pacing fixes — bridges across lakes, runaway paving — via this view).
+- Known gaps / ideas: shadows only from island+skirt (flora/structures don't cast); aurora/moon light is one directional light;
+  rivers reach the rim in ~4-5 places (waterfalls exist but are modest); lush valleys cover ~5% (golden grain dominates);
+  frame loop allocates ~30 KB/s in the real app (three internals + debug overlay), our own loops are allocation-free in Node tests.
+- Headless-test caveats: after ~3 GPU crashes Chrome disables WebGL for the session, so `test-interact` does at most 2 reloads.

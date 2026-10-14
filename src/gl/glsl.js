@@ -58,6 +58,7 @@ export const GLSL_ISLAND_VERT_NORMAL = /* glsl */`
 export const GLSL_ISLAND_VERT_POS = /* glsl */`
   vec3 transformed = vec3(sPxz.x, sElev, sPxz.y);
   vWP = transformed;
+  vWN = objectNormal;
   vSimUv = worldToUv(sPxz);
 `;
 
@@ -65,7 +66,7 @@ export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
   vec4 tA = simA(vSimUv);
   vec4 tB = simB(vSimUv);
   float elevF = vWP.y;
-  float upN = normalize(vNormal).y;
+  float upN = normalize(vWN).y;
   float steep = 1.0 - smoothstep(0.55, 0.88, upN);
   float rr = length(vWP.xz) / 10.0;
 

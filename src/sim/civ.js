@@ -360,7 +360,7 @@ function scanForOrders(world) {
   const civ = world.civ, rng = world.rng;
   let free = -1, open = 0;
   for (let o = 0; o < MAX_ORDERS; o++) { if (civ.oState[o] === 0) { if (free < 0) free = o; } else open++; }
-  if (free < 0 || open >= 6) return;
+  if (free < 0 || open >= 4 || civ.built >= TUNING.maxWorks) return;
   let bestI = -1, bestF = TUNING.orderThreshold;
   for (let k = 0; k < 140; k++) {
     const i = (rng.next() * (GRID_W * GRID_H)) | 0;
@@ -374,7 +374,13 @@ function scanForOrders(world) {
   for (let o = 0; o < MAX_ORDERS; o++) {
     if (civ.oState[o] === 0) continue;
     const dx = civ.oX[o] - x, dz = civ.oZ[o] - z;
-    if (dx * dx + dz * dz < 1.4 * 1.4) return;
+    if (dx * dx + dz * dz < 2.0 * 2.0) return;
+  }
+  for (let q = 0; q < civ.nS; q++) {
+    const k = civ.sKind[q];
+    if (k < 2 || k > 4) continue;
+    const dx = civ.sX[q] - x, dz = civ.sZ[q] - z;
+    if (dx * dx + dz * dz < 1.6 * 1.6) return;
   }
   const wet = world.water[bestI] > 0.025;
   const slope = slopeAtCell(world.elev, bestI);
@@ -396,7 +402,8 @@ function scanForOrders(world) {
       const wp = world.water[cellOf(px, pz)], wm = world.water[cellOf(mx, mz)];
       if (wp > 0.012 || wm > 0.012) half = 0.1 + s * 0.1 + 0.25;
     }
-    startOrder(world, free, KIND_BRIDGE, x, z, dirX, dirZ, Math.min(2.4, half * 2 + 0.3));
+    if (half * 2 > 1.5) return;      // a lake is not something you bridge
+    startOrder(world, free, KIND_BRIDGE, x, z, dirX, dirZ, half * 2 + 0.3);
   } else if (slope > TUNING.steepSlope) {
     const l = world.elev[bestI - 1], r = world.elev[bestI + 1], u = world.elev[bestI - GRID_W], d = world.elev[bestI + GRID_W];
     let gxs = r - l, gzs = d - u; const m = Math.sqrt(gxs * gxs + gzs * gzs) || 1;
