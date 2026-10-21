@@ -151,6 +151,21 @@ still very low-poly kit shapes (6-blade tufts, octahedron crowns, box cottages, 
   field plots tied to dwellings, tree age and felling for timber (Phase 2), erosion on cleared slopes.
 - Start with a short options list and pick with Jordan before building.
 
+## Open observations and questions (for later)
+
+- 2026-10-21 phone run of a fresh world after Phase 2 (~2 min): 0 errors, fps avg ~57 (min 42 after load), worst frame
+  50 ms, sim 1.5-2.0 ms/frame, structures 15 -> 26, sim ran ~1.7x real time (substep cap). Snapshot shows the new
+  sizes reading right on the device.
+- Sculpt cursor ring looks big next to the smaller villagers. It is the tool's real effect radius (1.5 u), not a
+  sizing bug. Question for Jordan: shrink the brush for the new scale (less terrain changed per stroke)?
+- Phase 2 tuning: material deliveries usually land ~40-50 s into a build, so supplied works barely speed up.
+  Question: let haulers stock a work as soon as its order opens (before the Mason arrives)?
+- Timber is rare early (0-4 loads in 12 min): little mature forest near rivers in the first minutes. Watch whether
+  that feels right once forests have grown in.
+- Not yet seen on the phone: haulers with grey/brown loads (needs a longer watch).
+- Particle sizes (rockfall, dust) next to the smaller villagers: not checked yet (Phase 1b leftover).
+- Taps in Chrome "Desktop site" mode read as drags (MOVE_PX vs zoomed layout); fix if it comes up again.
+
 ## Deferred
 
 Web Worker (sim < 0.5 ms/substep; SAB unavailable here), 256² grid, GPU simulation passes.
