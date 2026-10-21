@@ -2,7 +2,8 @@
 
 Starting point: Gemini's "Simulation upgrade plans" (PDF, 2026-10-21). Every factual claim in it was checked
 against the code at `0244dc1`; this plan keeps what holds, corrects what doesn't, and reorders by value / risk.
-Jordan's request added Phase 0 (sim speed).
+Jordan's request added Phase 0 (sim speed). Gemini then reviewed this plan; its four traps were checked against the
+code and folded in below (marked **[review]**).
 
 ## What the check found
 
@@ -46,6 +47,18 @@ building, myth clocks. Phone soak: 240 s real = 503 s sim.
   clocks) and can be stretched without making water crawl.
 - Check: time-based checks in `test-interact` (e.g. Monsoon rainfall after 5.5 s, pool >= 8 structures) may need
   longer waits; sim tests call `simStep` directly and are unaffected. Fewer substeps per frame also lowers CPU cost.
+- **[review] Frames with no sim step.** The sim runs fixed 0.025 s steps; at speed 1.0 and 60 fps the pattern is
+  0, 1, 1 steps per frame, so a third of frames advance nothing (`main.js:312-315`). Two consequences:
+  - Brush strokes (`sculptAt` / `rainAt` run in `ctl.update`, every frame) only reach the GPU on frames with a step,
+    because `packSimTextures` is gated on `n > 0`. Fix: a `world.dirty` flag set by the tools; pack when
+    `n > 0 || world.dirty`.
+  - Villagers are drawn straight from sim positions (`villagers.js:56`), so they would move in 40 Hz steps on a 60 Hz
+    screen. Fix: keep the previous position per villager and interpolate by `simAcc / dt` when filling the instance
+    buffer (render-side only; sim stays deterministic). The phone already runs at 60-82 fps, so this judder exists
+    above ~80 fps even at today's 2.0.
+- **[review] SPEC feel targets.** SPEC.md asks for visible crop/soil succession within ~25 s of play (line 212) and
+  Mason dispatch within ~10 s of traffic (line 324), both tuned at 2.0. Slowing down is the point, so Phase 0
+  rewrites these targets in SPEC to whatever Jordan settles on, rather than speeding those rates back up.
 - **Decide with Jordan on the phone:** which feels too fast — the motion, the pace of change, or both.
   Later phases set their own timing targets in sim seconds against the speed chosen here.
 
@@ -56,6 +69,9 @@ Most visible payoff, lowest risk; pure ecology plus shaders.
   flooding knock it back. Bands: grass < 0.3, crops 0.3-0.65, trees > 0.65.
 - Pack it into `uSimTexC.b` (free channel); the flora shader shows trees where biomass is high instead of the
   boot-time hash (keep the hash as per-tuft jitter so the forest edge isn't a hard line).
+- **[review]** `uSimTexC` is only uploaded when a shade sweep completes (~every 16 frames, `main.js:316`). Fine for
+  slow growth; for instant changes (a villager clears a tree, a brush stroke) also write biomass in
+  `packSimTextures` and flag `texC` for upload on frames that pack.
 - Foragers prefer and reduce biomass; this is the hook for Phase 2's timber.
 - Timing target: an untouched fertile valley turns into forest over a few real minutes at the Phase 0 speed.
 - Tests: growth/clearing rates, determinism, zero-GC, save migration; snap frames before/after.
@@ -65,15 +81,24 @@ Most visible payoff, lowest risk; pure ecology plus shaders.
 - Haulers fetch **stone** from steep exposed cells and **timber** from biomass > 0.65 and deliver to open Mason
   orders. Supplied orders build faster; unsupplied orders still progress slowly (no deadlock if the island has no
   forest or quarry).
-- Quarrying lowers `elev` a little, clamped and rate-limited; check the hydro mass test and `preview-map` so quarries
-  don't drain rivers. Logging lowers biomass (ties to Phase 1).
+- Quarrying lowers `elev` a little, clamped and rate-limited. Logging lowers biomass (ties to Phase 1).
+- **[review] Quarry sites:** dry upland only: `water === 0` on the cell and its 4 neighbours, steep
+  (`slope > TUNING.steepSlope`), well above the water table. `depositLip` is only 0.03, so quarrying a pond's rim
+  could drain it. Check with `preview-map` that no basin or river changes course.
+- **[review] Mass bookkeeping:** add `world.stats.quarried` and include it in the `?debug=1` rock-drift readout
+  (`main.js:276`), or the overlay will show a fake erosion leak.
 - Extend `test-loop.mjs` with the new links: forest -> timber -> bridge; slope -> stone -> steps.
 
 ## Phase 3 — Smarter walking (Gemini Phase 1), smaller than proposed
 
 The measured problem is 0-8% stuck villagers, so start small and measure.
-- One or two shared distance fields (home and active work orders), cost = slope + unbridged water, relaxed
-  with a few fast-sweeping passes on a fixed substep cadence inside `simStep`.
+- One or two shared distance fields, cost = slope + unbridged water, relaxed with a few fast-sweeping passes on a
+  fixed substep cadence inside `simStep`.
+- **[review] Use a field only when the villager's target is one of its sources.** A field seeded at *every*
+  healthy dwelling fits `ST_HAUL` (goes to the nearest one) but not `ST_REST` (own home, `civ.js:188`) or
+  `ST_MIGRATE` (one specific dwelling, `civ.js:209`): following the shared gradient would lead them to the wrong
+  door and `arrive()` would never fire. Those states keep the local steering (or rest at any healthy dwelling and
+  update `vHome` on arrival, a design change to decide then).
 - Keep the 5-feeler steering for local avoidance; blend in the field gradient.
 - Goal: stuck rate < 2% and more crossings over built bridges (add a counter). Budget < 0.2 ms/substep.
   Add more fields (food, monument) only if those trips show up as stuck.
@@ -84,6 +109,8 @@ The measured problem is 0-8% stuck villagers, so start small and measure.
   means retuning hydro, erosion, waterfalls and fertility.
 - **Keep, cheap:** compacted paths absorb less rain (infiltration scaled by `1 - compaction`), so trampled roads
   turn into runoff gullies in Monsoon; muddy water tint from `sediment` in `uSimTexC.g`.
+- **[review]** The water material doesn't bind `uSimTexC` yet (`terrain.js:91`; the island shader does), and sediment
+  moves every substep, so pack it with `packSimTextures` on every stepped frame, not on the shade-sweep cadence.
 - **Experiment behind a TUNING flag:** lateral bank erosion; keep only if preview-map shows better channels.
 - **Defer groundwater:** moisture already diffuses (`ecology.js:50`) and springs exist.
 
