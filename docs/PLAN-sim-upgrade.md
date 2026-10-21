@@ -73,6 +73,46 @@ Still to do: judge on the phone; nudge the numbers if it now feels too slow.
 - Tests: growth / trampling / drowning / range / seeding / home clearing (fails with clearing off) / determinism /
   v1 migration / round-trip / corrupt biomass rejected. Frames: `docs/screens/succession-boot.png`,
   `succession-4min.png` (via the new debug hook `__mythos.advance(simSeconds)`).
+- Phone (2026-10-21): an old v1 save loaded and migrated on the device (save 747 -> 832 KB), 0 errors, fps avg ~60
+  (min 52 after load), sim 2.4 ms/frame. Jordan: "looks decent".
+
+## Phase 1b — Asset sizing revamp (added 2026-10-21, Jordan)
+
+Visual only; no sim changes. Do it before Phase 2, which adds quarries and timber that need to read at the right size.
+
+**Measured now** (world units; island ~18 u across, one sim cell 0.156 u):
+
+| Asset | Height | Where it comes from |
+|---|---|---|
+| Villager | 0.44 | model 0.40 x `SCALE` 1.1 (`villagers.js:49`) |
+| Cottage | walls 0.34, ridge 0.54 | kit sizes in `structures.js:20-27` (instance scale 1) |
+| Grass tuft | ~0.25-0.45 (to ~0.57 on rich soil) | blades 0.42-0.76 (`flora.js:17`) x 0.58 x `hgt` (`glsl_flora.js:37`) |
+| Tree | ~0.46 typical, ~0.73 max | trunk 0.52 + crown to 0.79, same x 0.58 x `hgt` |
+| Monolith | ~1.2 | `structures.js:49-54` |
+
+Problems: a villager is taller than a cottage's walls, grass reaches villagers' shoulders, and a tree is barely taller
+than a person, so the island reads as giants in a garden rather than a miniature world.
+
+**Target proportions** (stylised tilt-shift miniature, in villager heights H): door ~1.1 H, cottage eaves ~1.5 H and
+ridge ~2.3 H; grass <= 0.35 H, ripe grain ~0.6 H; trees 2.5-4 H; monolith ~5 H.
+
+**Approach**
+- First step, with Jordan on the phone: pick the anchor. Default proposal: keep houses, monoliths and the island
+  as they are (camera framing, shadows and glow pools are tuned to them); shrink villagers (~0.6x) and grass
+  (~0.6x); grow trees (~2x, from crop-height to clearly above roofs). Check villagers stay readable on the phone at
+  the default camera distance (some exaggeration is fine: it's a stylised miniature).
+- Put the size constants in one place (e.g. `src/gl/scale.js`: villager, grass, crop, tree, per-kind structure
+  scales) instead of literals spread over geometry builders and shaders.
+- Debug view `?lineup=1`: one of each asset side by side on flat ground, for snap frames and phone screenshots.
+
+**Knock-on effects to check:** villager walk bob / greet hop amplitudes (`villagers.js:61-62`); flora flattening and
+drowning thresholds; CPU shadow stamps for dwellings/monoliths (`stampObjectShadows`); glow-pool radii;
+particle sizes (rockfall, dust) next to smaller villagers; cursor ring sizes; the audit's pool/geometry checks.
+Bridges, steps and paving keep their sim-driven lengths (`sLen`); only their height/decoration may change.
+
+**Verification:** lineup frames before/after; default-camera and close-up frames (llvmpipe, `__mythos.advance` for a
+grown island); phone screenshots in portrait; `npm run verify`; fps unchanged on the phone (no vertex-count growth
+beyond the tree crown if it gets more facets).
 
 ## Phase 2 — Building materials (Gemini Phase 3, second half), trimmed
 
@@ -118,4 +158,5 @@ Web Worker (sim < 0.5 ms/substep; SAB unavailable here), 256² grid, GPU simulat
 
 ## Order
 
-Phase 0 -> 1 -> 2 -> 3 -> 4. Phases 1 and 2 share the biomass field; Phase 3 benefits from Phase 2's extra trips.
+Phase 0 -> 1 -> 1b -> 2 -> 3 -> 4. Phases 1 and 2 share the biomass field; 1b sets sizes before Phase 2 adds
+quarries and timber; Phase 3 benefits from Phase 2's extra trips.
