@@ -94,18 +94,26 @@ Anchor kept: dwellings, monoliths, island. Sizes now live in `src/gl/scale.js` (
   The planned `?lineup=1` view wasn't needed.
 - Not changed yet (check on the phone): particle sizes next to the smaller villagers, cursor rings.
 
-## Phase 2 — Building materials (Gemini Phase 3, second half), trimmed
+## Phase 2 — Building materials (DONE 2026-10-21)
 
-- Haulers fetch **stone** from steep exposed cells and **timber** from biomass > 0.65 and deliver to open Mason
-  orders. Supplied orders build faster; unsupplied orders still progress slowly (no deadlock if the island has no
-  forest or quarry).
-- Quarrying lowers `elev` a little, clamped and rate-limited. Logging lowers biomass (ties to Phase 1).
-- **[review] Quarry sites:** dry upland only: `water === 0` on the cell and its 4 neighbours, steep
-  (`slope > TUNING.steepSlope`), well above the water table. `depositLip` is only 0.03, so quarrying a pond's rim
-  could drain it. Check with `preview-map` that no basin or river changes course.
-- **[review] Mass bookkeeping:** add `world.stats.quarried` and include it in the `?debug=1` rock-drift readout
-  (`main.js:276`), or the overlay will show a fake erosion leak.
-- Extend `test-loop.mjs` with the new links: forest -> timber -> bridge; slope -> stone -> steps.
+- Bridges need **timber**, steps and paving need **stone**; a work wants `matPerOrder` (3) loads. It builds at full
+  speed while delivered material lasts and at `unsuppliedRate` (0.35) without, so it never deadlocks.
+- Haulers take material runs (`ST_FETCH` -> `ST_SUPPLY`, utility 1.05) to the nearest open work within 6 u that is short
+  of material; the run survives re-decisions (like a Mason's job) and is abandoned after 60 sim s. Orders closing
+  release their haulers. Runtime-only state (`vSupply`, `vCargoKind`, `oMat`, `oSupp`); save format unchanged.
+- Sources within 3 u of the work: timber from biomass > 0.6 (felling removes 0.45 at the cell, 0.2 around it; it
+  regrows); stone only where `quarryOk`: steep, no water within 2 cells, not covered, > 0.8 u from a home (the
+  review's levee warning). Quarrying lowers elevation (0.006 at the cell, 0.002 around), tracked in
+  `stats.quarried`; the `?debug=1` rock-drift readout adds it back.
+- Cargo shows as a tinted load: basket brown (food), dark wood (timber), grey (stone) (`docs/screens/hauler-stone.png`).
+- Measured (3 seeds, 12 real min): 38-50 stone loads, 0-4 timber (few bridges; little mature forest by rivers early),
+  ~0.8-1.1 elevation units quarried in total; town pace unchanged (12-16 works by 12 min).
+- Tests (`test-sim` 5e0, civStep-only so no water moves): stone gets quarried and delivered; no lowered cell touches
+  water; `stats.quarried` matches the removed rock exactly; timber gets felled; a supplied bridge finishes before an
+  unsupplied one and both finish. Test windows widened for slower unsupplied builds; the first-bridge myth test now
+  opens its order directly (it relied on the random order scan hitting one frustrated cell).
+- Tuning to revisit: deliveries usually arrive ~40-50 s into a build (walk + source distance), so supplied works rarely
+  run at full speed for long. Options: let haulers pre-stock orders as soon as they open, or shorter source radius.
 
 ## Phase 3 — Smarter walking (Gemini Phase 1), smaller than proposed
 

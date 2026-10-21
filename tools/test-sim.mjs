@@ -9,7 +9,7 @@ import { Rng } from '../src/sim/rng.js';
 import { computeShadeRows, stampObjectShadows } from '../src/sim/shade.js';
 import { createParticles, stepParticles, breezeLanterns, PARTICLE_CAP, P_ROCK, P_LANTERN, P_RAIN, P_SPRAY, P_EMBER } from '../src/sim/particles.js';
 import { emitEvent, EV_ROCKFALL, EV_DUST, EV_LANTERN } from '../src/sim/events.js';
-import { seedCivilization, civStep, KIND_BRIDGE, KIND_DWELLING, KIND_MYTH, ROLE_MYSTIC, ST_BUILD, recordMyth, MYTH_FLOOD, MYTH_MAX } from '../src/sim/civ.js';
+import { seedCivilization, civStep, slopeAtCell as slopeAtCellT, KIND_STEPS, KIND_BRIDGE, KIND_DWELLING, KIND_MYTH, ROLE_MYSTIC, ST_BUILD, recordMyth, MYTH_FLOOD, MYTH_MAX } from '../src/sim/civ.js';
 import { sculptAt, rainAt, placeMonolith, monolithEffects, MAX_MONOLITHS } from '../src/sim/tools.js';
 import { sampleGrid, visualHeight, raymarchHeightfield } from '../src/sim/sample.js';
 import { nextEvent, EV_MONOLITH_PLACE, EV_MONOLITH_PULSE } from '../src/sim/events.js';
@@ -351,6 +351,56 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   check('civ: mystics gather at a monolith and launch sky-lanterns', near >= 6 && lanterns >= 2, `${near} mystics nearby, ${lanterns} lanterns`);
 }
 
+// 5e0. building materials: haulers fetch timber / stone for Mason works (civStep only, so no water moves and
+// every lowered cell must be a quarry)
+{
+  const setup = () => { const w = createWorld(1337); prewarm(w); seedCivilization(w); return w; };
+  const openOrder = (w, kind, x, z) => {
+    const c = w.civ; c.oKind[0] = kind; c.oState[0] = 1; c.oX[0] = x; c.oZ[0] = z; c.oDirX[0] = 1; c.oDirZ[0] = 0; c.oLen[0] = 0.8;
+    c.oProg[0] = 0; c.oWorker[0] = -1; c.oStruct[0] = -1; c.oDust[0] = 0; c.oMat[0] = 0; c.oSupp[0] = 0;
+  };
+  const run = (w, secs, until) => { const dt = w.params.dt; for (let k = 0; k < secs / dt; k++) { w.stats.time += dt; civStep(w, dt); if (until && until()) return w.stats.time; } return -1; };
+  const cellAt = (x, z) => Math.round((z + 10) / 20 * 128 - 0.5) * 128 + Math.round((x + 10) / 20 * 128 - 0.5);
+  // stone: a steps order near steep dry ground
+  const w = setup();
+  let qi = -1;
+  for (let i = 0; i < GRID_N && qi < 0; i++) {
+    const x = i % 128, z = (i / 128) | 0; if (x < 30 || x > 98 || z < 30 || z > 98) continue;
+    let dry = w.mask[i] === 0; for (let dz = -3; dz <= 3 && dry; dz++) for (let dx = -3; dx <= 3; dx++) if (w.water[i + dz * 128 + dx] > 0.001) { dry = false; break; }
+    if (dry && slopeAtCellT(w.elev, i) > 0.05) qi = i;
+  }
+  check('materials setup: found steep dry ground', qi >= 0);
+  const ox = (qi % 128 + 0.5) / 128 * 20 - 10 + 1.2, oz = (((qi / 128) | 0) + 0.5) / 128 * 20 - 10;
+  const elev0 = Float32Array.from(w.elev), water0 = Float32Array.from(w.water);
+  openOrder(w, KIND_STEPS, ox, oz);
+  run(w, 90, () => w.stats.stoneLoads >= 2);
+  check('materials: haulers quarry stone and bring it to a steps order', w.stats.stoneLoads >= 1 && w.stats.quarried > 0, `stone loads ${w.stats.stoneLoads}, quarried ${w.stats.quarried.toFixed(4)}`);
+  let lowered = 0, nearWater = 0, removed = 0;
+  for (let i = 0; i < GRID_N; i++) {
+    const d = elev0[i] - w.elev[i]; if (d <= 1e-7) continue;
+    lowered++; removed += d;
+    const x = i % 128, z = (i / 128) | 0;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const j = (z + dz) * 128 + x + dx; if (water0[j] > 0.001) nearWater++; }
+  }
+  check('materials: quarrying only cuts dry ground (no lowered cell touches water)', lowered > 0 && nearWater === 0, `${lowered} cells lowered, ${nearWater} next to water`);
+  check('materials: quarried stone is accounted for in stats.quarried', Math.abs(removed - w.stats.quarried) < 1e-4, `removed ${removed.toFixed(5)} vs stats ${w.stats.quarried.toFixed(5)}`);
+  // timber: a bridge order next to a planted wood; supplied works build faster than unsupplied ones
+  const timed = (withWood) => {
+    const t = setup(); const c = t.civ;
+    let d = 0; for (; d < c.nS; d++) if (c.sKind[d] === KIND_DWELLING) break;
+    const bx = c.sX[d] + 2.2, bz = c.sZ[d];
+    if (withWood) { for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++) { const i = cellAt(bx, bz) + dz * 128 + dx; if (t.mask[i] === 0) t.biomass[i] = 0.95; } }
+    else t.biomass.fill(0);
+    const b0 = t.biomass[cellAt(bx, bz)];
+    openOrder(t, KIND_BRIDGE, bx, bz);
+    const done = run(t, 240, () => t.civ.built > 0);
+    return { done, loads: t.stats.timberLoads, felled: b0 - t.biomass[cellAt(bx, bz)] };
+  };
+  const wood = timed(true), bare = timed(false);
+  check('materials: haulers fell timber for a bridge', wood.loads >= 1, `timber loads ${wood.loads}`);
+  check('materials: a supplied bridge finishes sooner than an unsupplied one, and both finish', wood.done > 0 && bare.done > 0 && wood.done < bare.done, `supplied ${wood.done.toFixed(1)} s vs bare ${bare.done.toFixed(1)} s`);
+}
+
 // 5e1. monoliths appear in the structure pool
 {
   const w = createWorld(1337); prewarm(w); seedCivilization(w);
@@ -375,8 +425,14 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   for (let i = 0; i < GRID_N; i++) { const x = i % 128, zz = (i / 128) | 0; if (x > 20 && x < 108 && zz > 20 && zz < 108 && w.water[i] > 0.04 && w.mask[i] === 0 && Math.hypot(w.vx[i], w.vz[i]) > 0.3) { river = i; break; } }
   const mcur = { i: w.events.head };
   const hasBridgeMyth = () => { for (let k = 0; k < w.civ.nM; k++) if (w.civ.mKind[k] === 1) return k; return -1; };
-  // 90 sim s: walk (0.30 u/s) + buildTime 20 s
-  for (let i = 0; i < 40 * 90 && hasBridgeMyth() < 0; i++) { w.frustration[river] = Math.max(w.frustration[river], w.civ.bridges === 0 ? 0.9 : 0); simStep(w); }
+  // open the bridge order directly: whether the random order scan hits one frustrated cell is luck (dispatch has its
+  // own test above); this checks that the first finished bridge becomes a myth. Up to 200 sim s: walk + build
+  // (up to buildTime / unsuppliedRate ~57 s if no timber arrives in time)
+  { const c = w.civ, rx = ((river % 128) + 0.5) / 128 * 20 - 10, rz = (((river / 128) | 0) + 0.5) / 128 * 20 - 10;
+    const fl = Math.hypot(w.vx[river], w.vz[river]) || 1;
+    c.oKind[0] = KIND_BRIDGE; c.oState[0] = 1; c.oX[0] = rx; c.oZ[0] = rz; c.oDirX[0] = -w.vz[river] / fl; c.oDirZ[0] = w.vx[river] / fl; c.oLen[0] = 0.9;
+    c.oProg[0] = 0; c.oWorker[0] = -1; c.oStruct[0] = -1; c.oDust[0] = 0; c.oMat[0] = 0; c.oSupp[0] = 0; }
+  for (let i = 0; i < 40 * 200 && hasBridgeMyth() < 0; i++) simStep(w);
   const bm = hasBridgeMyth();
   check('myths: the first bridge becomes a myth with a carved stone', bm >= 0 && w.civ.sKind[w.civ.mStruct[bm]] === KIND_MYTH, `nM ${w.civ.nM}, bridges ${w.civ.bridges}`);
   let mythEv = 0, kq; while ((kq = nextEvent(w.events, mcur)) >= 0) if (w.events.type[kq] === 9) mythEv++;

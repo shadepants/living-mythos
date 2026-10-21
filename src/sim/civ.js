@@ -12,6 +12,8 @@ export const ST_IDLE = 0, ST_WALK = 1, ST_FORAGE = 2, ST_HAUL = 3, ST_BUILD = 4,
 // Structure kinds
 export const KIND_DWELLING = 0, KIND_MONOLITH = 1, KIND_BRIDGE = 2, KIND_STEPS = 3, KIND_PAVING = 4, KIND_MYTH = 5;
 export const ST_GATHER = 10;
+export const ST_FETCH = 11, ST_SUPPLY = 12;          // hauler material runs: walk to forest/quarry, then to the work
+export const MAT_FOOD = 0, MAT_TIMBER = 1, MAT_STONE = 2;
 // Myth kinds (spec 1.2)
 export const MYTH_BRIDGE = 1, MYTH_REVIVE = 2, MYTH_MONOLITH = 3, MYTH_FLOOD = 4, MYTH_STEPS = 5, MYTH_LANTERNS = 6;
 export const MYTH_MAX = 12;
@@ -29,10 +31,12 @@ export function createCiv() {
     vX: f(nV), vZ: f(nV), vVX: f(nV), vVZ: f(nV), vTX: f(nV), vTZ: f(nV), vCargo: f(nV), vEnergy: f(nV), vPhase: f(nV), vTimer: f(nV), vHeading: f(nV),
     vRole: new Uint8Array(nV), vState: new Uint8Array(nV),
     vHome: new Int32Array(nV).fill(-1), vJob: new Int32Array(nV).fill(-1), vAux: new Int32Array(nV).fill(-1),
+    vSupply: new Int32Array(nV).fill(-1), vSupplyT0: f(nV), vCargoKind: new Uint8Array(nV),   // runtime-only (not saved)
     nS: 0, dwellings: 0, sEpoch: 0,   // sEpoch: bumped when an existing slot moves, so the renderer rewrites its matrices
     sX: f(nS), sZ: f(nS), sRot: f(nS), sBias: f(nS), sBuild: f(nS), sDecay: f(nS), sLum: f(nS), sDirX: f(nS), sDirZ: f(nS), sLen: f(nS),
     sKind: new Uint8Array(nS), sActive: new Uint8Array(nS),
     oX: f(MAX_ORDERS), oZ: f(MAX_ORDERS), oDirX: f(MAX_ORDERS), oDirZ: f(MAX_ORDERS), oLen: f(MAX_ORDERS), oProg: f(MAX_ORDERS), oDust: f(MAX_ORDERS),
+    oMat: f(MAX_ORDERS), oSupp: new Uint8Array(MAX_ORDERS),   // delivered loads, haulers on the way
     oKind: new Uint8Array(MAX_ORDERS), oState: new Uint8Array(MAX_ORDERS), oWorker: new Int32Array(MAX_ORDERS).fill(-1), oStruct: new Int32Array(MAX_ORDERS).fill(-1),
     food: 0, masons: 0, built: 0, bridges: 0, revived: 0, mythFirstBridge: false,
     monoStruct: new Int32Array(8).fill(-1), monoX: new Float32Array(8), monoZ: new Float32Array(8),
@@ -179,6 +183,12 @@ function decide(world, v) {
 
   // Mason with an assigned job keeps walking to it
   if (civ.vJob[v] >= 0) { civ.vState[v] = ST_BUILD; civ.vTX[v] = civ.oX[civ.vJob[v]]; civ.vTZ[v] = civ.oZ[civ.vJob[v]]; return; }
+  // a hauler on a material run keeps going (state and target unchanged) unless it has dragged on too long
+  if (civ.vSupply[v] >= 0) {
+    if (world.stats.time - civ.vSupplyT0[v] < TUNING.supplyGiveUp) return;
+    releaseSupply(civ, v);
+  }
+  let supplyO = -1;
 
   let bestU = 0.08, bestA = ST_IDLE, tx = x, tz = z;
 
@@ -199,6 +209,14 @@ function decide(world, v) {
       const w = role === ROLE_FORAGER ? 1.0 : role === ROLE_HAULER ? 0.85 : 0.45;
       const u = (1 - c) * (0.35 + 0.65 * e) * f * w * 1.1;
       if (u > bestU) { bestU = u; bestA = ST_FORAGE; tx = tmp2[0]; tz = tmp2[1]; }
+    }
+  }
+  // haulers bring timber / stone to open Mason works
+  if (role === ROLE_HAULER && c < 0.2 && e > 0.25) {
+    const o = orderNeedingMaterial(civ, x, z);
+    if (o >= 0) {
+      const sc = pickSource(world, civ.oX[o], civ.oZ[o], matForKind(civ.oKind[o]), tmp2);
+      if (sc > 0 && 1.05 > bestU) { bestU = 1.05; bestA = ST_FETCH; tx = tmp2[0]; tz = tmp2[1]; supplyO = o; }
     }
   }
   // migrate away from a barren or ruined home
@@ -234,6 +252,89 @@ function decide(world, v) {
   }
   civ.vState[v] = bestA;
   civ.vTX[v] = tx; civ.vTZ[v] = tz;
+  if (bestA === ST_FETCH) {
+    civ.food += c * 10; civ.vCargo[v] = 0;   // drop off any scraps of food first
+    civ.vSupply[v] = supplyO; civ.vSupplyT0[v] = world.stats.time; civ.oSupp[supplyO]++;
+  }
+}
+
+function matForKind(kind) { return kind === KIND_BRIDGE ? MAT_TIMBER : MAT_STONE; }
+
+// nearest open work (waiting, Mason on the way, or being built) still short of material, within supplyRange
+function orderNeedingMaterial(civ, x, z) {
+  let best = -1, bd = TUNING.supplyRange * TUNING.supplyRange;
+  for (let o = 0; o < MAX_ORDERS; o++) {
+    const st = civ.oState[o];
+    if (st === 0 || civ.oMat[o] + civ.oSupp[o] >= TUNING.matPerOrder) continue;
+    const dx = civ.oX[o] - x, dz = civ.oZ[o] - z, d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+
+// Stone only from steep, dry upland well away from water (quarrying a pond's rim would drain it: depositLip is 0.03)
+// and from homes.
+function quarryOk(world, i) {
+  const gx = i % GRID_W, gz = (i / GRID_W) | 0;
+  if (gx < 3 || gz < 3 || gx > GRID_W - 4 || gz > GRID_H - 4) return false;
+  if (world.mask[i] !== 0 || world.engCover[i] !== 0 || slopeAtCell(world.elev, i) <= TUNING.steepSlope) return false;
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    const j = i + dz * GRID_W + dx;
+    if (world.water[j] > 0.001 || world.mask[j] !== 0) return false;
+  }
+  return true;
+}
+
+// best of 12 random cells around an order: mature forest for timber, quarry-able rock for stone. Returns score.
+function pickSource(world, ox, oz, mat, out) {
+  const rng = world.rng, civ = world.civ;
+  let best = -1, bx = ox, bz = oz;
+  for (let k = 0; k < 12; k++) {
+    const a = rng.next() * 6.283, r = 0.4 + Math.sqrt(rng.next()) * (TUNING.sourceRadius - 0.4);
+    const cx = ox + Math.cos(a) * r, cz = oz + Math.sin(a) * r;
+    if (cx * cx + cz * cz > 7.8 * 7.8) continue;
+    const i = cellOf(cx, cz);
+    let sc = -1;
+    if (mat === MAT_TIMBER) { if (world.mask[i] === 0 && world.water[i] < 0.02 && world.biomass[i] > TUNING.timberMin) sc = world.biomass[i]; }
+    else if (quarryOk(world, i)) {
+      const d = nearestDwelling(civ, cx, cz, false);
+      if (d < 0 || Math.hypot(civ.sX[d] - cx, civ.sZ[d] - cz) > 0.8) sc = slopeAtCell(world.elev, i) * 10;
+    }
+    if (sc > best) { best = sc; bx = cx; bz = cz; }
+  }
+  out[0] = bx; out[1] = bz;
+  return best;
+}
+
+// take one load from the source cell: fell trees (biomass) or cut stone (elevation, tracked for the mass budget)
+function extractMaterial(world, i, mat) {
+  const gx = i % GRID_W, gz = (i / GRID_W) | 0;
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const X = gx + dx, Z = gz + dz;
+    if (X < 0 || Z < 0 || X >= GRID_W || Z >= GRID_H) continue;
+    const j = Z * GRID_W + X, centre = dx === 0 && dz === 0;
+    if (mat === MAT_TIMBER) {
+      const b = world.biomass[j] - (centre ? TUNING.fellCenter : TUNING.fellRing);
+      world.biomass[j] = b < 0 ? 0 : b;
+    } else if (world.mask[j] === 0) {
+      const e = world.elev[j], ne = Math.max(TUNING.elevFloor, e - (centre ? TUNING.quarryCenter : TUNING.quarryRing));
+      world.elev[j] = ne; world.stats.quarried += e - ne;
+    }
+  }
+  if (mat === MAT_TIMBER) world.stats.timberLoads++; else world.stats.stoneLoads++;
+}
+
+function releaseSupply(civ, v) {
+  const o = civ.vSupply[v];
+  if (o >= 0 && civ.oSupp[o] > 0) civ.oSupp[o]--;
+  civ.vSupply[v] = -1;
+  if (civ.vCargoKind[v] !== MAT_FOOD) { civ.vCargo[v] = 0; civ.vCargoKind[v] = MAT_FOOD; }
+}
+
+// an order closed (built or cancelled): haulers still bringing material to it stop
+function releaseOrderSuppliers(civ, o) {
+  for (let v = 0; v < civ.nV; v++) if (civ.vSupply[v] === o) { releaseSupply(civ, v); civ.vState[v] = ST_IDLE; civ.vTimer[v] = 0.3; }
+  civ.oSupp[o] = 0; civ.oMat[o] = 0;
 }
 
 function nearestHealthyOther(civ, home) {
@@ -269,6 +370,21 @@ function arrive(world, v) {
     civ.vTimer[v] = 8;
     civ.vState[v] = ST_IDLE;
     return;
+  } else if (st === ST_FETCH) {
+    const o = civ.vSupply[v];
+    if (o >= 0 && civ.oState[o] !== 0) {
+      const mat = matForKind(civ.oKind[o]);
+      extractMaterial(world, cellOf(civ.vX[v], civ.vZ[v]), mat);
+      civ.vCargo[v] = 1; civ.vCargoKind[v] = mat;
+      civ.vState[v] = ST_SUPPLY; civ.vTX[v] = civ.oX[o]; civ.vTZ[v] = civ.oZ[o];
+      return;
+    }
+    releaseSupply(civ, v);
+  } else if (st === ST_SUPPLY) {
+    const o = civ.vSupply[v];
+    if (o >= 0 && civ.oState[o] !== 0) civ.oMat[o] += 1;
+    releaseSupply(civ, v);
+    civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.1);
   } else if (st === ST_PROCESSION) {
     civ.vTimer[v] = 2.5 + world.rng.next() * 2;
     civ.lanternClock += 0;
@@ -357,7 +473,7 @@ function startOrder(world, i, kind, x, z, dirX, dirZ, len) {
   const civ = world.civ;
   civ.lastOrderT = world.stats.time;
   civ.oKind[i] = kind; civ.oState[i] = 1; civ.oX[i] = x; civ.oZ[i] = z; civ.oDirX[i] = dirX; civ.oDirZ[i] = dirZ; civ.oLen[i] = len;
-  civ.oProg[i] = 0; civ.oWorker[i] = -1; civ.oStruct[i] = -1; civ.oDust[i] = 0;
+  civ.oProg[i] = 0; civ.oWorker[i] = -1; civ.oStruct[i] = -1; civ.oDust[i] = 0; civ.oMat[i] = 0; civ.oSupp[i] = 0;
 }
 
 function scanForOrders(world) {
@@ -453,18 +569,21 @@ function progressBuilds(world, dt) {
     const st = civ.oState[o];
     if (st !== 2 && st !== 3) continue;
     const w = civ.oWorker[o];
-    if (w < 0) { civ.oState[o] = 0; continue; }
+    if (w < 0) { civ.oState[o] = 0; releaseOrderSuppliers(civ, o); continue; }
     const dx = civ.vX[w] - civ.oX[o], dz = civ.vZ[w] - civ.oZ[o];
     if (st === 2) {
       if (dx * dx + dz * dz < 0.2 * 0.2) {
         const s = addStructure(civ, civ.oKind[o], civ.oX[o], civ.oZ[o], 0, 0, civ.oDirX[o], civ.oDirZ[o], civ.oLen[o]);
-        if (s < 0) { civ.oState[o] = 0; civ.vJob[w] = -1; civ.oWorker[o] = -1; continue; }
+        if (s < 0) { civ.oState[o] = 0; civ.vJob[w] = -1; civ.oWorker[o] = -1; releaseOrderSuppliers(civ, o); continue; }
         civ.oStruct[o] = s; civ.oState[o] = 3; civ.vState[w] = ST_IDLE; civ.vTimer[w] = 99;
       }
       continue;
     }
     civ.vState[w] = ST_IDLE; civ.vTimer[w] = 99; civ.vVX[w] = 0; civ.vVZ[w] = 0;
-    civ.oProg[o] += dt / TUNING.buildTime;
+    // full speed while delivered material lasts (matPerOrder loads cover the whole build), a crawl without
+    const supplied = civ.oMat[o] > 0;
+    civ.oProg[o] += dt / TUNING.buildTime * (supplied ? 1 : TUNING.unsuppliedRate);
+    if (supplied) civ.oMat[o] = Math.max(0, civ.oMat[o] - dt / TUNING.buildTime * TUNING.matPerOrder);
     civ.sBuild[civ.oStruct[o]] = civ.oProg[o] > 1 ? 1 : civ.oProg[o];
     civ.oDust[o] -= dt;
     if (civ.oDust[o] <= 0) { civ.oDust[o] = 0.4; emitEvent(world.events, EV_DUST, civ.oX[o] + (world.rng.next() - 0.5) * 0.3, civ.oZ[o] + (world.rng.next() - 0.5) * 0.3, 1); }
@@ -485,6 +604,7 @@ function completeOrder(world, o) {
   const w = civ.oWorker[o];
   civ.vJob[w] = -1; civ.vTimer[w] = 0.3; civ.vState[w] = ST_IDLE;
   civ.oState[o] = 0; civ.oWorker[o] = -1; civ.oStruct[o] = -1;
+  releaseOrderSuppliers(civ, o);
 }
 
 function markCoverFor(world, x, z, dirX, dirZ, len, radius, kind) {

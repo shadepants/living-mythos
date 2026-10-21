@@ -39,7 +39,7 @@ export function createWorld(seed) {
       kCap: TUNING.kCap, kErode: TUNING.kErode, kDeposit: TUNING.kDeposit,
       ecoGrow: 1.0, evapMul: 1.0,
     },
-    stats: { rimDrained: 0, flux: 0, substeps: 0, time: 0 },
+    stats: { rimDrained: 0, flux: 0, substeps: 0, time: 0, quarried: 0, timberLoads: 0, stoneLoads: 0 },
   };
   generateIsland(world);
   world.civ = createCiv();

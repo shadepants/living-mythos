@@ -97,7 +97,8 @@ console.log('--- L4 frustration -> Mason -> structure -> relief (no frustration 
   const crossing = () => { for (let v = 0; v < walkers; v++) { const dxx = w.civ.vTX[v] - w.civ.vX[v]; if (v >= 0 && (w.civ.vState[v] !== 1 || Math.abs(dxx) < 0.15)) { w.civ.vTX[v] = cx + (dxx > 0 ? -0.5 : 0.5); w.civ.vTZ[v] = cz; w.civ.vState[v] = 1; } w.civ.vTimer[v] = 1e9; w.civ.vRole[v] = 0; } };
   for (let v = 0; v < walkers; v++) { w.civ.vX[v] = cx - 0.5 + (v % 3) * 0.1; w.civ.vZ[v] = cz + (v % 5) * 0.05; w.civ.vTX[v] = cx + 0.5; w.civ.vTZ[v] = cz; w.civ.vState[v] = 1; }
   let peakF = 0, tOrder = -1, tBuilt = -1; const t0 = w.stats.time;
-  for (let s = 0; s < 40 * 60 && tBuilt < 0; s++) {
+  // 150 sim s: frustration builds, order opens, Mason walks over, and an unsupplied work crawls (~57 s) until haulers bring material
+  for (let s = 0; s < 40 * 150 && tBuilt < 0; s++) {
     crossing(); simStep(w);
     let f = 0; for (let k = -3; k <= 3; k++) for (let j = -3; j <= 3; j++) f = Math.max(f, w.frustration[rc + k * GRID_W + j]);
     peakF = Math.max(peakF, f);

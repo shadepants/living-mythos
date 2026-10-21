@@ -137,3 +137,8 @@ Sizes are in `src/gl/scale.js`. Villagers ~0.27 tall (were 0.44, taller than cot
 taller with fuller crowns. Walking slowed to 0.30 u/s to match the smaller bodies, food per dwelling 260 to keep the
 town's growth pace. Close-up frames: `node tools/snap.mjs out.png --eval "$(cat tools/snap-village.js)"`.
 
+## Building materials (Phase 2, 2026-10-21)
+Haulers fetch timber (from mature forest) and stone (from steep dry upland, never near water or homes) for Mason works;
+supplied works build at full speed, unsupplied ones crawl. Quarrying is tracked in `stats.quarried`. Details and
+measurements in `docs/PLAN-sim-upgrade.md` Phase 2.
+

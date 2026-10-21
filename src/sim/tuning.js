@@ -47,6 +47,17 @@ export const TUNING = Object.freeze({
   forageClear: 0.04,      // biomass removed per forage visit (villagers clear woods around the settlement)
   homeClearRadius: 1.6,   // world units around a healthy dwelling kept open as fields
   homeClearLevel: 0.35,   // biomass at the doorstep (crop level), rising to no limit at the radius
+  // building materials (Phase 2): bridges need timber, steps and paving need stone, carried by haulers
+  matPerOrder: 3,         // loads a work needs to build at full speed
+  unsuppliedRate: 0.35,   // build speed without material (so a work never deadlocks)
+  supplyRange: 6.0,       // world units: haulers serve orders within this distance
+  sourceRadius: 3.0,      // world units around the order to look for forest / quarry
+  supplyGiveUp: 60,       // sim s before an unfinished supply run is abandoned
+  timberMin: 0.6,         // biomass a cell needs to be felled for timber
+  fellCenter: 0.45,       // biomass removed at the felled cell (neighbours get fellRing)
+  fellRing: 0.2,
+  quarryCenter: 0.006,    // elevation removed per stone load at the quarry cell (neighbours get quarryRing)
+  quarryRing: 0.002,
   biasDiffuse: 0.05,
   biasDecay: 0.002,
 

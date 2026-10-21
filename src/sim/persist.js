@@ -70,6 +70,7 @@ export function restoreWorld(world, text) {
   world.stats.time = data.time || 0;
   // runtime-only state that is not saved: orders restart, builders go home, unfinished works are considered done
   civ.oState.fill(0); civ.oWorker.fill(-1); civ.oStruct.fill(-1); civ.vJob.fill(-1);
+  civ.oMat.fill(0); civ.oSupp.fill(0); civ.vSupply.fill(-1); civ.vCargoKind.fill(0);   // material runs restart too
   for (let v = 0; v < civ.nV; v++) { civ.vState[v] = 0; civ.vTimer[v] = Math.random() * 1.5; civ.vVX[v] = 0; civ.vVZ[v] = 0; }
   for (let s = 0; s < civ.nS; s++) if (civ.sKind[s] >= 2 && civ.sKind[s] <= 4 && civ.sBuild[s] < 1) civ.sBuild[s] = 1;
   world.vx.fill(0); world.vz.fill(0);

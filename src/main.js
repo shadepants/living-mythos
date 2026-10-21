@@ -360,7 +360,8 @@ function boot() {
       debugUi.update(dt, () => {
         let w = 0; for (let i = 0; i < world.water.length; i++) if (!world.mask[i]) w += world.water[i];
         const rock = landSum(world.elev, world.sediment);
-        return { tier: TIER_NAMES[gov.tier], water: w, rock, drift: (rock - rock0) / rock0 * 100, villagers: world.civ.nV, structures: world.civ.nS, myths: world.civ.nM, particles: particles.count };
+        return { tier: TIER_NAMES[gov.tier], water: w, rock, drift: (rock + world.stats.quarried - rock0) / rock0 * 100,   // quarried stone left the ground on purpose
+        villagers: world.civ.nV, structures: world.civ.nS, myths: world.civ.nM, particles: particles.count };
       });
     }
     if (DEBUG && frame === 1) console.info('[mythos] programs compiled:', renderer.info.programs.length);

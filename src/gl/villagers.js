@@ -74,7 +74,7 @@ export function createVillagers(caps) {
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);
       const o = i * 4;
-      sa[o] = civ.vRole[i]; sa[o + 1] = civ.vCargo[i]; sa[o + 2] = ph;
+      sa[o] = civ.vRole[i]; sa[o + 1] = civ.vCargo[i] + 2 * civ.vCargoKind[i];   // cargo 0..1 + 2 x kind (food / timber / stone) sa[o + 2] = ph;
       sa[o + 3] = st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;
     }
     mesh.instanceMatrix.needsUpdate = true;

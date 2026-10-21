@@ -206,7 +206,8 @@ vec3 lin2(vec3 c) { return pow(c, vec3(2.2)); }
 
 export const GLSL_VILL_POS = /* glsl */`
   float role = aInstanceState.x;
-  float cargo = aInstanceState.y;
+  float cargoKind = floor(aInstanceState.y * 0.5);   // 0 food, 1 timber, 2 stone
+  float cargo = aInstanceState.y - cargoKind * 2.0;
   float phase = aInstanceState.z;
   float lant = aInstanceState.w;
   float vpid = aPart.x;
@@ -224,7 +225,7 @@ export const GLSL_VILL_POS = /* glsl */`
   vec3 vg = vec3(0.0);
   if (abs(vpid - 1.0) < 0.5) vc = vec3(0.86, 0.70, 0.56);
   else if (abs(vpid - 2.0) < 0.5) vc = cloakC * 0.7;
-  else if (abs(vpid - 3.0) < 0.5) vc = vec3(0.55, 0.40, 0.22);
+  else if (abs(vpid - 3.0) < 0.5) vc = cargoKind < 0.5 ? vec3(0.55, 0.40, 0.22) : cargoKind < 1.5 ? vec3(0.36, 0.22, 0.11) : vec3(0.58, 0.58, 0.62);
   else if (abs(vpid - 5.0) < 0.5) vc = vec3(0.20, 0.15, 0.10);
   else if (abs(vpid - 4.0) < 0.5) { vc = vec3(1.0, 0.8, 0.4); vg = vec3(1.0, 0.66, 0.24) * (0.25 + clamp(uNight * 1.4 + lant, 0.0, 2.0) * 1.8); }
   vVCol = lin2(vc);
