@@ -142,3 +142,8 @@ Haulers fetch timber (from mature forest) and stone (from steep dry upland, neve
 supplied works build at full speed, unsupplied ones crawl. Quarrying is tracked in `stats.quarried`. Details and
 measurements in `docs/PLAN-sim-upgrade.md` Phase 2.
 
+## Smarter walking (Phase 3, 2026-10-21)
+Resting and food-hauling villagers follow a shared "effort to the nearest healthy home" field (`src/sim/paths.js`)
+cell to cell, so they find bridges and fords; resting villagers settle at the home they reach. Stuck villagers
+7% -> ~3%, +0.09 ms per substep. Details in `docs/PLAN-sim-upgrade.md` Phase 3.
+

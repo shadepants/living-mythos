@@ -6,6 +6,7 @@ import { simStep } from '../src/sim/sim.js';
 import { ecologyStep } from '../src/sim/ecology.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { Rng } from '../src/sim/rng.js';
+import { stepHomeField, homeFieldAt, homeFieldNext } from '../src/sim/paths.js';
 import { computeShadeRows, stampObjectShadows } from '../src/sim/shade.js';
 import { createParticles, stepParticles, breezeLanterns, PARTICLE_CAP, P_ROCK, P_LANTERN, P_RAIN, P_SPRAY, P_EMBER } from '../src/sim/particles.js';
 import { emitEvent, EV_ROCKFALL, EV_DUST, EV_LANTERN } from '../src/sim/events.js';
@@ -399,6 +400,61 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   const wood = timed(true), bare = timed(false);
   check('materials: haulers fell timber for a bridge', wood.loads >= 1, `timber loads ${wood.loads}`);
   check('materials: a supplied bridge finishes sooner than an unsupplied one, and both finish', wood.done > 0 && bare.done > 0 && wood.done < bare.done, `supplied ${wood.done.toFixed(1)} s vs bare ${bare.done.toFixed(1)} s`);
+}
+
+// 5e0b. walking: the shared home field (Phase 3)
+{
+  const w = createWorld(1337); prewarm(w); seedCivilization(w);
+  const build = (wd) => { for (let k = 0; k < 2 * 12 * 2; k++) stepHomeField(wd, slopeAtCellT); };   // two full builds
+  build(w);
+  const pf = w.pathField, c = w.civ;
+  let srcOk = true;
+  for (let d = 0; d < c.nS; d++) {
+    if (c.sKind[d] !== KIND_DWELLING || c.sBuild[d] < 1 || c.sDecay[d] > 0.3) continue;
+    const i = Math.round((c.sZ[d] + 10) / 20 * 128 - 0.5) * 128 + Math.round((c.sX[d] + 10) / 20 * 128 - 0.5);
+    if (pf.field[i] !== 0) srcOk = false;
+  }
+  check('home field: ready, and zero at every healthy home', pf.ready && srcOk);
+  // descend cell to cell from 40 land cells: every walk ends at a home (value 0) within 400 steps
+  const out = new Float32Array(2); let reached = 0, tried = 0;
+  for (let k = 0; k < 40; k++) {
+    const i0 = ((k * 2654435761) >>> 0) % GRID_N; if (w.mask[i0] || pf.field[i0] >= 1e8) continue;
+    tried++; let x = ((i0 % 128) + 0.5) / 128 * 20 - 10, z = (((i0 / 128) | 0) + 0.5) / 128 * 20 - 10;
+    for (let s = 0; s < 400; s++) { if (!homeFieldNext(w, x, z, out)) break; x = out[0]; z = out[1]; }
+    if (homeFieldAt(w, x, z) === 0) reached++;
+  }
+  check('home field: descending from anywhere reachable ends at a home', tried > 10 && reached === tried, `${reached}/${tried}`);
+  // a deep river with one bridged crossing: the descent crosses on the bridge instead of wading
+  const r = createWorld(1337); prewarm(r); seedCivilization(r);
+  for (let i = 0; i < GRID_N; i++) { r.elev[i] = 0.5; r.water[i] = 0; r.engCover[i] = 0; }
+  for (let z = 0; z < 128; z++) r.water[z * 128 + 64] = r.water[z * 128 + 65] = 0.2;   // spans the island: no way around
+  for (const x of [64, 65]) r.engCover[48 * 128 + x] = 2;   // 8 rows off the straight line: a short detour beats wading
+  // (a bridge 40 rows away loses to a 2-cell wade under the same costs, which is a fair trade-off)
+  const rc = r.civ;
+  for (let d = 0; d < rc.nS; d++) rc.sDecay[d] = 1;
+  rc.sKind[0] = KIND_DWELLING; rc.sBuild[0] = 1; rc.sDecay[0] = 0; rc.sX[0] = (40 + 0.5) / 128 * 20 - 10; rc.sZ[0] = (40 + 0.5) / 128 * 20 - 10;
+  build(r);
+  let x = (90 + 0.5) / 128 * 20 - 10, z = (40 + 0.5) / 128 * 20 - 10, waded = 0, onBridge = 0;
+  for (let s = 0; s < 600; s++) {
+    const gx = Math.round((x + 10) / 20 * 128 - 0.5), gz = Math.round((z + 10) / 20 * 128 - 0.5), i = gz * 128 + gx;
+    if (r.water[i] > 0.07) { if (r.engCover[i] !== 0) onBridge++; else waded++; }
+    if (!homeFieldNext(r, x, z, out)) break; x = out[0]; z = out[1];
+  }
+  check('home field: a path across a deep river uses the bridge, not a ford', homeFieldAt(r, x, z) === 0 && waded === 0 && onBridge > 0, `waded ${waded}, on bridge ${onBridge}, reached home ${homeFieldAt(r, x, z) === 0}`);
+  // regression on the measured problem: villagers on their way to rest keep making progress
+  const g = createWorld(1337); prewarm(g); seedCivilization(g);
+  for (let s = 0; s < 240 / g.params.dt; s++) simStep(g);
+  let trips = 0, stuck = 0; const gc = g.civ;
+  for (let round = 0; round < 10; round++) {
+    const st0 = Uint8Array.from(gc.vState), f0 = new Float32Array(gc.nV);
+    for (let v = 0; v < gc.nV; v++) f0[v] = homeFieldAt(g, gc.vX[v], gc.vZ[v]);
+    for (let s = 0; s < 120; s++) simStep(g);
+    for (let v = 0; v < gc.nV; v++) {
+      if (st0[v] !== 7 || gc.vState[v] !== 7 || !(f0[v] > 0.5 && f0[v] < 1e8)) continue;
+      trips++; if (homeFieldAt(g, gc.vX[v], gc.vZ[v]) > f0[v] - 0.1) stuck++;
+    }
+  }
+  check('walking: resting villagers keep making progress toward a home (stuck < 5%)', trips > 20 && stuck / trips < 0.05, `${stuck}/${trips} stuck over 3 s`);
 }
 
 // 5e1. monoliths appear in the structure pool

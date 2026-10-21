@@ -115,19 +115,25 @@ Anchor kept: dwellings, monoliths, island. Sizes now live in `src/gl/scale.js` (
 - Tuning to revisit: deliveries usually arrive ~40-50 s into a build (walk + source distance), so supplied works rarely
   run at full speed for long. Options: let haulers pre-stock orders as soon as they open, or shorter source radius.
 
-## Phase 3 — Smarter walking (Gemini Phase 1), smaller than proposed
+## Phase 3 — Smarter walking (DONE 2026-10-21)
 
-The measured problem is 0-8% stuck villagers, so start small and measure.
-- One or two shared distance fields, cost = slope + unbridged water, relaxed with a few fast-sweeping passes on a
-  fixed substep cadence inside `simStep`.
-- **[review] Use a field only when the villager's target is one of its sources.** A field seeded at *every*
-  healthy dwelling fits `ST_HAUL` (goes to the nearest one) but not `ST_REST` (own home, `civ.js:188`) or
-  `ST_MIGRATE` (one specific dwelling, `civ.js:209`): following the shared gradient would lead them to the wrong
-  door and `arrive()` would never fire. Those states keep the local steering (or rest at any healthy dwelling and
-  update `vHome` on arrival, a design change to decide then).
-- Keep the 5-feeler steering for local avoidance; blend in the field gradient.
-- Goal: stuck rate < 2% and more crossings over built bridges (add a counter). Budget < 0.2 ms/substep.
-  Add more fields (food, monument) only if those trips show up as stuck.
+- Measured first: 7.0% of walking villagers made no progress over 3 s (3 seeds); 83 of 109 were **resting** villagers
+  heading for their own home, two thirds of them standing in water (pacing on river banks).
+- `src/sim/paths.js`: one shared field, "walking effort to the nearest healthy home" (same costs as the local
+  steering: slope, wading +2.4, deep water +22, bridges/paving cheaper, rim +60). Built inside `simStep`, no RNG:
+  one 8-neighbour chamfer sweep every other substep into a scratch copy, published every 12 sweeps (~0.6 sim s).
+  Runtime-only; rebuilds itself after a load.
+- Used only where any home is a valid destination (the review's trap): food hauling, and resting, which now means
+  "shelter at the nearest reachable healthy home and settle there" (`vHome` updates on arrival; only rest and
+  migration read `vHome`). Villagers step to the lowest neighbouring cell; under `homeFieldNear` (0.35) they steer
+  straight to the nearest door. Two dead ends on the way: an 8-way argmin of sampled values and a smooth gradient
+  both flip-flopped on narrow paths (a terrace edge) and stalled villagers in place.
+- Result: stuck 7.0% -> 2.6-3.1% (rest 83 -> 18; about half of the rest are slow wading, not blocked). Cost
+  +0.09 ms per substep (0.82 -> 0.91 ms in Node). Town pace unchanged within 1-2 works.
+- Tests: field zero at every healthy home; cell-to-cell descent from anywhere reachable ends at a home; across a
+  deep river spanning the island, a bridge 8 rows off the line is used instead of wading; resting villagers stuck
+  < 5% (2/48). Note: under these costs a 2-cell deep wade (~8 effort) still beats a bridge ~40 cells away.
+- Not done: a bridge-crossing counter; fields for other trips (fetch/supply/build stuck rates are small).
 
 ## Phase 4 — Water extras (Gemini Phase 2), mostly cut
 

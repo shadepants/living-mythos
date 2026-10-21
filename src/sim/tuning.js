@@ -58,6 +58,7 @@ export const TUNING = Object.freeze({
   fellRing: 0.2,
   quarryCenter: 0.006,    // elevation removed per stone load at the quarry cell (neighbours get quarryRing)
   quarryRing: 0.002,
+  homeFieldNear: 0.35,    // home-field effort below which a villager steers straight to the nearest door (Phase 3)
   biasDiffuse: 0.05,
   biasDecay: 0.002,
 

@@ -1,6 +1,7 @@
 import { TUNING } from './tuning.js';
 import { GRID_W, GRID_H, CELL_SIZE } from './grid.js';
 import { sampleGrid, worldToGridX, worldToGridZ } from './sample.js';
+import { stepHomeField, homeFieldAt, homeFieldNext, HF_INF } from './paths.js';
 import {
   nextEvent, emitEvent, EV_BUILD_DONE, EV_DUST, EV_LANTERN, EV_CHIME, EV_GREET, EV_REVIVE, EV_MYTH,
 } from './events.js';
@@ -173,6 +174,7 @@ function pickFertile(world, x, z, radius, out) {
   out[0] = bx; out[1] = bz;
   return bf;
 }
+const tmpDir = new Float32Array(2);
 const tmp2 = new Float32Array(2);
 
 function decide(world, v) {
@@ -361,6 +363,8 @@ function arrive(world, v) {
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.15);
   } else if (st === ST_REST) {
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.5);
+    const d = nearestDwelling(civ, civ.vX[v], civ.vZ[v], true);   // rested at the nearest reachable home: settle there
+    if (d >= 0 && Math.hypot(civ.sX[d] - civ.vX[v], civ.sZ[d] - civ.vZ[v]) < 0.5) civ.vHome[v] = d;
   } else if (st === ST_MIGRATE) {
     if (civ.vAux[v] >= 0) civ.vHome[v] = civ.vAux[v];
   } else if (st === ST_CONSECRATE) {
@@ -436,9 +440,23 @@ function moveVillager(world, v, dt) {
   if (st === ST_IDLE || st === ST_GREET) { civ.vVX[v] *= 0.8; civ.vVZ[v] *= 0.8; return dist; }
   if (dist < 0.12) { civ.vVX[v] = 0; civ.vVZ[v] = 0; return dist; }
   const dirx = dx / dist, dirz = dz / dist;
-  // five candidate headings, lowest local cost + remaining distance wins (gradient descent on the cost field)
   let bestC = 1e9, bx = dirx, bz = dirz;
-  for (let k = 0; k < 5; k++) {
+  // resting and food-hauling villagers can go to any healthy home: walk down the shared home field (finds bridges and
+  // fords), then switch to direct steering for the last stretch to the nearest door
+  let followed = false;
+  if (st === ST_REST || st === ST_HAUL) {
+    const here = homeFieldAt(world, x, z);
+    if (here < HF_INF && here > TUNING.homeFieldNear) {
+      followed = homeFieldNext(world, x, z, tmpDir);   // head for the lowest neighbouring cell (gradients stalled on narrow paths)
+      if (followed) { const ex = tmpDir[0] - x, ez = tmpDir[1] - z, el = Math.sqrt(ex * ex + ez * ez) || 1; bx = ex / el; bz = ez / el; }
+    } else if (here <= TUNING.homeFieldNear) {
+      const d = nearestDwelling(civ, x, z, true);
+      if (d >= 0 && (civ.vTX[v] !== civ.sX[d] || civ.vTZ[v] !== civ.sZ[d])) { civ.vTX[v] = civ.sX[d]; civ.vTZ[v] = civ.sZ[d]; if (st === ST_HAUL) civ.vAux[v] = d; }
+    }
+  }
+  // otherwise five candidate headings, lowest local cost + remaining distance wins (gradient descent on the cost field)
+  if (!followed) bestC = 1e9;
+  for (let k = 0; k < 5 && !followed; k++) {
     const hx = dirx * HEAD_COS[k] - dirz * HEAD_SIN[k], hz = dirx * HEAD_SIN[k] + dirz * HEAD_COS[k];
     const nx = x + hx * 0.38, nz = z + hz * 0.38;
     const rx = civ.vTX[v] - nx, rz = civ.vTZ[v] - nz;
@@ -777,6 +795,7 @@ export function civStep(world, dt) {
   const civ = world.civ;
   syncMonoliths(world, dt);
   if (civ.dwellings === 0) return;
+  stepHomeField(world, slopeAtCell);
   readEvents(world);
   for (let v = 0; v < civ.nV; v++) {
     civ.vTimer[v] -= dt;

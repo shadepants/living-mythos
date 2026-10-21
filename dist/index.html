@@ -1322,6 +1322,7 @@ const TUNING = Object.freeze({
   fellRing: 0.2,
   quarryCenter: 0.006,    // elevation removed per stone load at the quarry cell (neighbours get quarryRing)
   quarryRing: 0.002,
+  homeFieldNear: 0.35,    // home-field effort below which a villager steers straight to the nearest door (Phase 3)
   biasDiffuse: 0.05,
   biasDecay: 0.002,
 
@@ -2139,6 +2140,101 @@ function kitFinish(b) {
   return g;
 }
 
+// ---- sim/paths.js ----
+// Phase 3: a shared "distance to the nearest healthy home" field over the grid, measured in walking effort (steep
+// ground, wading and deep water cost more; bridges / paving less; the cliff rim is near-impassable). Resting and
+// food-hauling villagers walk down it, so they find a bridge or ford instead of pacing on a river bank.
+// Built incrementally inside simStep (deterministic, no RNG): one 8-neighbour chamfer sweep per substep into a scratch
+// field, cycling the four sweep directions; every HF_CYCLE sweeps the scratch is published and a new build starts.
+const HF_INF = 1e9;
+const HF_CYCLE = 12;   // 3 passes x 4 directions
+const D1 = CELL_SIZE, D2 = CELL_SIZE * Math.SQRT2;
+
+// per-cell walking effort multiplier, consistent with the local steering cost (civ.js stepCost)
+function homeFieldCost(world, i, slope) {
+  let c = 1 + slope * 14;
+  const w = world.water[i];
+  if (world.engCover[i] === 0) { if (w > 0.025) c += 2.4; if (w > 0.07) c += 22; }
+  else c = Math.max(0.65, c - 0.35);
+  if (world.mask[i] === 1) c += 60;
+  return c;
+}
+
+function stepHomeField(world, slopeAtCell) {
+  const civ = world.civ, pf = world.pathField;
+  pf.skip = !pf.skip;
+  if (pf.skip) return;   // one sweep every other substep: ~0.1 ms, a fresh field every 0.6 sim s (homes change over minutes)
+  const k = pf.phase;
+  const s = pf.scratch, cost = pf.cost;
+  if (k === 0) {
+    // start a build: costs for this cycle, sources at healthy finished dwellings
+    for (let i = 0; i < GRID_N; i++) { s[i] = HF_INF; cost[i] = homeFieldCost(world, i, slopeAtCell(world.elev, i)); }
+    let n = 0;
+    for (let d = 0; d < civ.nS; d++) {
+      if (civ.sKind[d] !== 0 || civ.sBuild[d] < 1 || civ.sDecay[d] > 0.3) continue;
+      const gx = Math.round((civ.sX[d] + 10) / 20 * GRID_W - 0.5), gz = Math.round((civ.sZ[d] + 10) / 20 * GRID_H - 0.5);
+      if (gx < 0 || gz < 0 || gx >= GRID_W || gz >= GRID_H) continue;
+      s[gz * GRID_W + gx] = 0; n++;
+    }
+    pf.sources = n;
+  }
+  // one sweep in direction k % 4: (+x,+z), (-x,+z), (+x,-z), (-x,-z)
+  const dir = k % 4, sx = dir & 1 ? -1 : 1, sz = dir & 2 ? -1 : 1;
+  const x0 = sx > 0 ? 1 : GRID_W - 2, z0 = sz > 0 ? 1 : GRID_H - 2;
+  for (let zz = 0, z = z0; zz < GRID_H - 2; zz++, z += sz) {
+    for (let xx = 0, x = x0; xx < GRID_W - 2; xx++, x += sx) {
+      const i = z * GRID_W + x;
+      let best = s[i];
+      const ci = cost[i];
+      // upwind neighbours for this sweep direction (already updated this pass) plus their diagonal
+      const a = i - sx, b = i - sz * GRID_W, c = i - sx - sz * GRID_W, e = i + sx - sz * GRID_W;
+      let v = s[a] + (ci + cost[a]) * 0.5 * D1; if (v < best) best = v;
+      v = s[b] + (ci + cost[b]) * 0.5 * D1; if (v < best) best = v;
+      v = s[c] + (ci + cost[c]) * 0.5 * D2; if (v < best) best = v;
+      v = s[e] + (ci + cost[e]) * 0.5 * D2; if (v < best) best = v;
+      s[i] = best;
+    }
+  }
+  pf.phase = k + 1;
+  if (pf.phase >= HF_CYCLE) {
+    // publish: swap the finished field in, recycle the old one as the next scratch
+    const done = pf.scratch; pf.scratch = pf.field; pf.field = done; pf.phase = 0; pf.ready = pf.sources > 0;
+  }
+}
+
+// field value at a world position (nearest cell); HF_INF when unknown / not ready
+function homeFieldAt(world, x, z) {
+  const pf = world.pathField;
+  if (!pf.ready) return HF_INF;
+  let gx = Math.round((x + 10) / 20 * GRID_W - 0.5), gz = Math.round((z + 10) / 20 * GRID_H - 0.5);
+  if (gx < 0) gx = 0; else if (gx > GRID_W - 1) gx = GRID_W - 1;
+  if (gz < 0) gz = 0; else if (gz > GRID_H - 1) gz = GRID_H - 1;
+  return pf.field[gz * GRID_W + gx];
+}
+
+// Next step down the home field: the centre of the neighbouring cell (of 8) with the lowest value, written to out
+// as world x/z. Values strictly fall toward a home, so following cell to cell can't ping-pong (a smooth gradient
+// did: on narrow paths, e.g. along a terrace edge, central differences straddle the path and flip sign).
+// Returns false when the field isn't ready, the cell is unknown, or no neighbour is lower (at a home).
+function homeFieldNext(world, x, z, out) {
+  const pf = world.pathField;
+  if (!pf.ready) return false;
+  let gx = Math.round((x + 10) / 20 * GRID_W - 0.5), gz = Math.round((z + 10) / 20 * GRID_H - 0.5);
+  if (gx < 1 || gz < 1 || gx > GRID_W - 2 || gz > GRID_H - 2) return false;
+  const f = pf.field, i = gz * GRID_W + gx;
+  let best = f[i], bi = -1;
+  if (!(best < HF_INF)) return false;
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    if (dx === 0 && dz === 0) continue;
+    const j = i + dz * GRID_W + dx;
+    if (f[j] < best) { best = f[j]; bi = j; }
+  }
+  if (bi < 0) return false;
+  out[0] = ((bi % GRID_W) + 0.5) / GRID_W * 20 - 10;
+  out[1] = (((bi / GRID_W) | 0) + 0.5) / GRID_H * 20 - 10;
+  return true;
+}
+
 // ---- sim/civ.js ----
 // Roles
 const ROLE_FORAGER = 0, ROLE_HAULER = 1, ROLE_MASON = 2, ROLE_MYSTIC = 3;
@@ -2308,6 +2404,7 @@ function pickFertile(world, x, z, radius, out) {
   out[0] = bx; out[1] = bz;
   return bf;
 }
+const tmpDir = new Float32Array(2);
 const tmp2 = new Float32Array(2);
 
 function decide(world, v) {
@@ -2496,6 +2593,8 @@ function arrive(world, v) {
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.15);
   } else if (st === ST_REST) {
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.5);
+    const d = nearestDwelling(civ, civ.vX[v], civ.vZ[v], true);   // rested at the nearest reachable home: settle there
+    if (d >= 0 && Math.hypot(civ.sX[d] - civ.vX[v], civ.sZ[d] - civ.vZ[v]) < 0.5) civ.vHome[v] = d;
   } else if (st === ST_MIGRATE) {
     if (civ.vAux[v] >= 0) civ.vHome[v] = civ.vAux[v];
   } else if (st === ST_CONSECRATE) {
@@ -2571,9 +2670,23 @@ function moveVillager(world, v, dt) {
   if (st === ST_IDLE || st === ST_GREET) { civ.vVX[v] *= 0.8; civ.vVZ[v] *= 0.8; return dist; }
   if (dist < 0.12) { civ.vVX[v] = 0; civ.vVZ[v] = 0; return dist; }
   const dirx = dx / dist, dirz = dz / dist;
-  // five candidate headings, lowest local cost + remaining distance wins (gradient descent on the cost field)
   let bestC = 1e9, bx = dirx, bz = dirz;
-  for (let k = 0; k < 5; k++) {
+  // resting and food-hauling villagers can go to any healthy home: walk down the shared home field (finds bridges and
+  // fords), then switch to direct steering for the last stretch to the nearest door
+  let followed = false;
+  if (st === ST_REST || st === ST_HAUL) {
+    const here = homeFieldAt(world, x, z);
+    if (here < HF_INF && here > TUNING.homeFieldNear) {
+      followed = homeFieldNext(world, x, z, tmpDir);   // head for the lowest neighbouring cell (gradients stalled on narrow paths)
+      if (followed) { const ex = tmpDir[0] - x, ez = tmpDir[1] - z, el = Math.sqrt(ex * ex + ez * ez) || 1; bx = ex / el; bz = ez / el; }
+    } else if (here <= TUNING.homeFieldNear) {
+      const d = nearestDwelling(civ, x, z, true);
+      if (d >= 0 && (civ.vTX[v] !== civ.sX[d] || civ.vTZ[v] !== civ.sZ[d])) { civ.vTX[v] = civ.sX[d]; civ.vTZ[v] = civ.sZ[d]; if (st === ST_HAUL) civ.vAux[v] = d; }
+    }
+  }
+  // otherwise five candidate headings, lowest local cost + remaining distance wins (gradient descent on the cost field)
+  if (!followed) bestC = 1e9;
+  for (let k = 0; k < 5 && !followed; k++) {
     const hx = dirx * HEAD_COS[k] - dirz * HEAD_SIN[k], hz = dirx * HEAD_SIN[k] + dirz * HEAD_COS[k];
     const nx = x + hx * 0.38, nz = z + hz * 0.38;
     const rx = civ.vTX[v] - nx, rz = civ.vTZ[v] - nz;
@@ -2912,6 +3025,7 @@ function civStep(world, dt) {
   const civ = world.civ;
   syncMonoliths(world, dt);
   if (civ.dwellings === 0) return;
+  stepHomeField(world, slopeAtCell);
   readEvents(world);
   for (let v = 0; v < civ.nV; v++) {
     civ.vTimer[v] -= dt;
@@ -4102,6 +4216,7 @@ function createWorld(seed) {
     sedTmp: f(),                         // scratch for sediment advection
     ecoTmp: f(),                         // scratch for ecology diffusion
     biomass: f(),                        // standing vegetation 0..1 (grass -> crops -> forest), saved
+    pathField: { field: f(), scratch: f(), cost: f(), phase: 0, ready: false, sources: 0, skip: false },   // walking effort to the nearest healthy home (runtime-only)
     shade: new Float32Array(GRID_N).fill(1),   // sun shadow factor from the heightfield (runtime only)
     soil: f(),                           // fixed soil quality 0.55..1.45 (regenerated from the seed, not saved)
     ecoCount: 0,
