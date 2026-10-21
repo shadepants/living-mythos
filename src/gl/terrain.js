@@ -88,7 +88,7 @@ export function createWaterSurface(grid, caps) {
     vertexShader: GLSL_WATER_VERT,
     fragmentShader: GLSL_WATER_FRAG,
     uniforms: {
-      uSimTexA: SHARED.uSimTexA, uSimTexB: SHARED.uSimTexB, uTime: SHARED.uTime, uCell: SHARED.uCell,
+      uSimTexA: SHARED.uSimTexA, uSimTexB: SHARED.uSimTexB, uSimTexC: SHARED.uSimTexC, uTime: SHARED.uTime, uCell: SHARED.uCell,
       uSunDir: SHARED.uSunDir, uSunColor: SHARED.uSunColor, uSkyTop: SHARED.uSkyTop, uSkyHor: SHARED.uSkyHor,
       uFogColor: SHARED.uFogColor, uFogDensity: SHARED.uFogDensity, uRain: SHARED.uRain,
     },

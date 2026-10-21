@@ -22,7 +22,7 @@ export function ecologyStep(world, dt) {
   const bGrow = TUNING.biomassGrow * p.ecoGrow * dt, bDecay = TUNING.biomassDecay * dt;
   const absorb = Math.min(1, TUNING.moistAbsorb * dt);
   const evap = TUNING.moistEvap * dt * p.evapMul;
-  const rainGain = p.rain * dt * TUNING.moistFromRain;
+  const rainGain = p.rain * dt * TUNING.moistFromRain * TUNING.infiltration;   // the soaked-in share of the rain (x (1 - compaction) per cell)
   const grow = TUNING.fertGrow * p.ecoGrow * dt * 1.0;
   const decay = TUNING.fertDecay * dt;
   const cdecay = TUNING.fertCompactDecay * dt;
@@ -35,7 +35,7 @@ export function ecologyStep(world, dt) {
     if (wet > 1) wet = 1;
     let m = moisture[i];
     if (wet > m) m += (wet - m) * absorb; else m -= m * evap * (1 + TUNING.moistElevEvap * (elev[i] > 0 ? elev[i] : 0)) / (soil[i] * soil[i]);   // good soil holds water
-    m += rainGain;
+    m += rainGain * (1 - compaction[i]);
     if (m > 1) m = 1; else if (m < 0) m = 0;
     moisture[i] = m;
 

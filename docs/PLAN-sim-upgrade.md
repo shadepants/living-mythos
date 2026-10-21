@@ -135,16 +135,25 @@ Anchor kept: dwellings, monoliths, island. Sizes now live in `src/gl/scale.js` (
   < 5% (2/48). Note: under these costs a 2-cell deep wade (~8 effort) still beats a bridge ~40 cells away.
 - Not done: a bridge-crossing counter; fields for other trips (fetch/supply/build stuck rates are small).
 
-## Phase 4 — Water extras (Gemini Phase 2), mostly cut
+## Phase 4 — Water extras (DONE 2026-10-21)
 
-- **Drop the diagonal pipes:** the motivation (basin-dominated water) is out of date, and changing the pipe model
-  means retuning hydro, erosion, waterfalls and fertility.
-- **Keep, cheap:** compacted paths absorb less rain (infiltration scaled by `1 - compaction`), so trampled roads
-  turn into runoff gullies in Monsoon; muddy water tint from `sediment` in `uSimTexC.g`.
-- **[review]** The water material doesn't bind `uSimTexC` yet (`terrain.js:91`; the island shader does), and sediment
-  moves every substep, so pack it with `packSimTextures` on every stepped frame, not on the shade-sweep cadence.
-- **Experiment behind a TUNING flag:** lateral bank erosion; keep only if preview-map shows better channels.
-- **Defer groundwater:** moisture already diffuses (`ecology.js:50`) and springs exist.
+- **Dropped:** diagonal pipes (would mean retuning hydro, erosion, waterfalls and fertility) and groundwater
+  (moisture already diffuses, springs exist).
+- **Infiltration:** `TUNING.rain` 0.0002 -> 0.0004 plus `infiltration: 0.5`. Hydro keeps `1 - inf * (1 - compaction)` of
+  the rain as surface water; ecology soaks in `inf * (1 - compaction)`. Untrodden soil gets the same surface water
+  as before; a trodden cell (compaction 0.8) keeps ~1.8x the runoff and gains half the moisture (test 5b1).
+- **Muddy water:** sediment rides in `uSimTexC.g`, the water material now binds `uSimTexC`, and the water shader
+  blends to ochre by `smoothstep(0.06, 0.2, sediment / depth)`. Measured sediment/depth (90th percentile of wet
+  cells, seeds 1337 and 7): ~0.05 in fair weather, ~0.2 in the first minute of a Monsoon, ~0.09 after 3 min, ~0.04
+  after 8 min. So storms open with a muddy flush that clears; long Monsoons run clear again. Frame:
+  `docs/screens/monsoon-silt.png` (45 s into a Monsoon: the flooded hollow is silty, the deep river stays blue).
+- **Packing cadence:** sediment is packed with the shade sweep (~every 16 frames), not every stepped frame as the
+  review suggested. That avoids a 256 KB upload per frame and sediment changes slowly. Not yet watched live on the
+  phone; switch to `packSimTextures` if plumes visibly jump.
+- **Lateral bank erosion: tried, not kept.** A `bankErode` share of a channel cell's erosion cut from higher, dry
+  4-neighbours. At 0.1 the map barely changed; at 0.3 terrain moved 1.4-2.7x more (3 seeds), roughness rose, and on
+  seed 1337 the river cut its outlet and drained the central lake. Channels were not clearly better; code removed.
+- Cost unchanged (~0.96 ms per substep in Node). `npm run verify` green.
 
 ## Phase 5 — Asset upgrade and realism (Jordan, 2026-10-21; to be planned in detail)
 
@@ -178,5 +187,5 @@ Web Worker (sim < 0.5 ms/substep; SAB unavailable here), 256² grid, GPU simulat
 
 ## Order
 
-Phase 0 -> 1 -> 1b -> 2 -> 3 -> 4, with Phase 5 to be scheduled with Jordan. Phases 1 and 2 share the biomass field; 1b sets sizes before Phase 2 adds
+Phase 0 -> 1 -> 1b -> 2 -> 3 -> 4 (all done), with Phase 5 to be scheduled with Jordan. Phases 1 and 2 share the biomass field; 1b sets sizes before Phase 2 adds
 quarries and timber; Phase 3 benefits from Phase 2's extra trips.

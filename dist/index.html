@@ -294,6 +294,7 @@ uniform vec3 uSkyHor;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform float uRain;
+uniform sampler2D uSimTexC;
 ${GLSL_SIM}
 void main() {
   vec4 a = simA(vUv);
@@ -324,6 +325,10 @@ void main() {
   vec3 shallowC = lin(vec3(0.16, 0.58, 0.62));
   vec3 deepC = lin(vec3(0.02, 0.14, 0.30));
   vec3 body = mix(deepC, shallowC, trans) * (0.45 + 0.55 * max(dot(n, L), 0.0)) * (0.5 + 0.5 * uSunColor);
+  // silt: water carrying a lot of sediment for its depth turns ochre, clear otherwise. Measured sediment/depth: ~0.05
+  // (90th pct) in fair weather, ~0.2 in the first minute of a Monsoon, back to ~0.04 after ~8 min of steady rain
+  float silt = smoothstep(0.06, 0.2, fetchBil(uSimTexC, vUv).g / max(d, 0.01));
+  body = mix(body, lin(vec3(0.46, 0.33, 0.17)) * (0.5 + 0.5 * max(dot(n, L), 0.0)) * (0.5 + 0.5 * uSunColor), silt * 0.75);
 
   vec3 sky = mix(uSkyHor, uSkyTop, clamp(R.y, 0.0, 1.0));
   vec3 col = mix(body, sky, clamp(fres * 0.55, 0.0, 1.0));
@@ -496,7 +501,7 @@ const CELL_SIZE = WORLD_SIZE / GRID_W;
 function createSimTextures(floatLinear) {
   const bufA = new Float32Array(GRID_N * 4);
   const bufB = new Float32Array(GRID_N * 4);
-  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows), B = biomass (vegetation)
+  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows), G = sediment, B = biomass (vegetation)
   const filter = floatLinear ? THREE.LinearFilter : THREE.NearestFilter;
   const make = (buf) => {
     const t = new THREE.DataTexture(buf, GRID_W, GRID_H, THREE.RGBAFormat, THREE.FloatType);
@@ -526,8 +531,9 @@ function packShadeTexture(world, st) {
   const sh = world.shade, c = st.bufC;
   // biomass rides along on the shade sweep's upload (~every 16 frames): it changes over minutes, and packing it
   // every frame would re-upload the whole 256 KB texture each frame
-  const bm = world.biomass;
-  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) { c[j] = sh[i]; c[j + 2] = bm[i]; }
+  // sediment (G) rides along too: the water shader tints silty floodwater; plumes move slowly enough for this cadence
+  const bm = world.biomass, sd = world.sediment;
+  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) { c[j] = sh[i]; c[j + 1] = sd[i]; c[j + 2] = bm[i]; }
   st.texC.needsUpdate = true;
 }
 
@@ -1270,7 +1276,8 @@ const TUNING = Object.freeze({
   // hydrology
   gravity: 9.8,
   fluxDamp: 0.992,
-  rain: 0.0002,          // standing-water depth/s over every land cell (soil moisture uses moistFromRain)
+  rain: 0.0004,          // rainfall depth/s over every land cell; part soaks in (infiltration), the rest stays as surface water
+  infiltration: 0.5,     // share of rain that soaks into undisturbed soil; x (1 - compaction), so trodden paths shed it as runoff (Phase 4)
   evap: 0.0008,          // depth/s
   springRate: 0.5,       // depth/s at each spring cell
   springCount: 6,
@@ -4058,7 +4065,7 @@ function createWaterSurface(grid, caps) {
     vertexShader: GLSL_WATER_VERT,
     fragmentShader: GLSL_WATER_FRAG,
     uniforms: {
-      uSimTexA: SHARED.uSimTexA, uSimTexB: SHARED.uSimTexB, uTime: SHARED.uTime, uCell: SHARED.uCell,
+      uSimTexA: SHARED.uSimTexA, uSimTexB: SHARED.uSimTexB, uSimTexC: SHARED.uSimTexC, uTime: SHARED.uTime, uCell: SHARED.uCell,
       uSunDir: SHARED.uSunDir, uSunColor: SHARED.uSunColor, uSkyTop: SHARED.uSkyTop, uSkyHor: SHARED.uSkyHor,
       uFogColor: SHARED.uFogColor, uFogDensity: SHARED.uFogDensity, uRain: SHARED.uRain,
     },
@@ -4247,13 +4254,14 @@ function createWorld(seed) {
 function hydroStep(world) {
   const p = world.params;
   const dt = p.dt;
-  const { elev, water, fluxL, fluxR, fluxT, fluxB, vx, vz, sediment, fertility, mask, rimOut, sedTmp, springs } = world;
+  const { elev, water, fluxL, fluxR, fluxT, fluxB, vx, vz, sediment, fertility, mask, rimOut, sedTmp, springs, compaction } = world;
   const g = p.gravity, damp = p.fluxDamp;
 
   // sources
   if (p.rain > 0) {
-    const add = p.rain * dt;
-    for (let i = 0; i < GRID_N; i++) if (mask[i] === 0) water[i] += add;
+    // what doesn't soak in stays on the surface: undisturbed soil takes `infiltration` of it, compacted paths far less
+    const add = p.rain * dt, inf = TUNING.infiltration;
+    for (let i = 0; i < GRID_N; i++) if (mask[i] === 0) water[i] += add * (1 - inf * (1 - compaction[i]));
   }
   if (p.springRate > 0) {
     const add = p.springRate * dt;
@@ -4405,7 +4413,7 @@ function ecologyStep(world, dt) {
   const bGrow = TUNING.biomassGrow * p.ecoGrow * dt, bDecay = TUNING.biomassDecay * dt;
   const absorb = Math.min(1, TUNING.moistAbsorb * dt);
   const evap = TUNING.moistEvap * dt * p.evapMul;
-  const rainGain = p.rain * dt * TUNING.moistFromRain;
+  const rainGain = p.rain * dt * TUNING.moistFromRain * TUNING.infiltration;   // the soaked-in share of the rain (x (1 - compaction) per cell)
   const grow = TUNING.fertGrow * p.ecoGrow * dt * 1.0;
   const decay = TUNING.fertDecay * dt;
   const cdecay = TUNING.fertCompactDecay * dt;
@@ -4418,7 +4426,7 @@ function ecologyStep(world, dt) {
     if (wet > 1) wet = 1;
     let m = moisture[i];
     if (wet > m) m += (wet - m) * absorb; else m -= m * evap * (1 + TUNING.moistElevEvap * (elev[i] > 0 ? elev[i] : 0)) / (soil[i] * soil[i]);   // good soil holds water
-    m += rainGain;
+    m += rainGain * (1 - compaction[i]);
     if (m > 1) m = 1; else if (m < 0) m = 0;
     moisture[i] = m;
 

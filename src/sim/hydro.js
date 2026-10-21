@@ -6,13 +6,14 @@ import { TUNING } from './tuning.js';
 export function hydroStep(world) {
   const p = world.params;
   const dt = p.dt;
-  const { elev, water, fluxL, fluxR, fluxT, fluxB, vx, vz, sediment, fertility, mask, rimOut, sedTmp, springs } = world;
+  const { elev, water, fluxL, fluxR, fluxT, fluxB, vx, vz, sediment, fertility, mask, rimOut, sedTmp, springs, compaction } = world;
   const g = p.gravity, damp = p.fluxDamp;
 
   // sources
   if (p.rain > 0) {
-    const add = p.rain * dt;
-    for (let i = 0; i < GRID_N; i++) if (mask[i] === 0) water[i] += add;
+    // what doesn't soak in stays on the surface: undisturbed soil takes `infiltration` of it, compacted paths far less
+    const add = p.rain * dt, inf = TUNING.infiltration;
+    for (let i = 0; i < GRID_N; i++) if (mask[i] === 0) water[i] += add * (1 - inf * (1 - compaction[i]));
   }
   if (p.springRate > 0) {
     const add = p.springRate * dt;

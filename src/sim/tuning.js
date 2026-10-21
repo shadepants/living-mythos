@@ -6,7 +6,8 @@ export const TUNING = Object.freeze({
   // hydrology
   gravity: 9.8,
   fluxDamp: 0.992,
-  rain: 0.0002,          // standing-water depth/s over every land cell (soil moisture uses moistFromRain)
+  rain: 0.0004,          // rainfall depth/s over every land cell; part soaks in (infiltration), the rest stays as surface water
+  infiltration: 0.5,     // share of rain that soaks into undisturbed soil; x (1 - compaction), so trodden paths shed it as runoff (Phase 4)
   evap: 0.0008,          // depth/s
   springRate: 0.5,       // depth/s at each spring cell
   springCount: 6,

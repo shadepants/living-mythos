@@ -182,6 +182,7 @@ uniform vec3 uSkyHor;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform float uRain;
+uniform sampler2D uSimTexC;
 ${GLSL_SIM}
 void main() {
   vec4 a = simA(vUv);
@@ -212,6 +213,10 @@ void main() {
   vec3 shallowC = lin(vec3(0.16, 0.58, 0.62));
   vec3 deepC = lin(vec3(0.02, 0.14, 0.30));
   vec3 body = mix(deepC, shallowC, trans) * (0.45 + 0.55 * max(dot(n, L), 0.0)) * (0.5 + 0.5 * uSunColor);
+  // silt: water carrying a lot of sediment for its depth turns ochre, clear otherwise. Measured sediment/depth: ~0.05
+  // (90th pct) in fair weather, ~0.2 in the first minute of a Monsoon, back to ~0.04 after ~8 min of steady rain
+  float silt = smoothstep(0.06, 0.2, fetchBil(uSimTexC, vUv).g / max(d, 0.01));
+  body = mix(body, lin(vec3(0.46, 0.33, 0.17)) * (0.5 + 0.5 * max(dot(n, L), 0.0)) * (0.5 + 0.5 * uSunColor), silt * 0.75);
 
   vec3 sky = mix(uSkyHor, uSkyTop, clamp(R.y, 0.0, 1.0));
   vec3 col = mix(body, sky, clamp(fres * 0.55, 0.0, 1.0));
