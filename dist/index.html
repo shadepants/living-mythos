@@ -1326,7 +1326,7 @@ const TUNING = Object.freeze({
   structureCap: 600,
   dwellingCap: 40,
   startDwellings: 14,
-  walkSpeed: 0.42,         // world units/s (was 0.55; slowed 2026-10-21, Jordan: villagers a little too fast)
+  walkSpeed: 0.30,         // world units/s: ~1.1 body heights/s for the ~0.27-tall villagers (Phase 1b; 0.55 -> 0.42 -> 0.30)
   slopePenalty: 10,        // speed divisor: 1 + slope * this
   frustrateRate: 0.35,     // frustration/s added per villager standing on a steep or wet uncovered cell
   frustrateDecay: 0.01,    // 1/s everywhere
@@ -1340,7 +1340,7 @@ const TUNING = Object.freeze({
   maxWorks: 40,            // total bridges / stairs / paving the community will ever build
   ruinFertility: 0.22,
   ruinRate: 0.045,         // decay/s when local fertility is below ruinFertility
-  foodPerDwelling: 360,    // was 55: the town filled to the 40-dwelling cap within one real minute
+  foodPerDwelling: 260,    // was 55 (cap within one real minute) -> 360 -> 260 to keep that pace at walkSpeed 0.30
 
   // island shape
   rimRadius: 0.92,
@@ -2974,6 +2974,24 @@ function createStructures(caps) {
   return mesh;
 }
 
+// ---- gl/scale.js ----
+// Asset sizes in one place (Phase 1b sizing revamp). World units; the island is ~18 u across, a sim cell 0.156 u.
+// Anchor: dwellings, monoliths and the island keep their size (camera framing, shadow stamps and glow pools are
+// tuned to them); villagers, grass and trees are sized against them. Target proportions in villager heights H:
+// cottage eaves ~1.3 H and ridge ~2 H, grass <= ~0.5 H, trees ~3 H.
+const SIZE = {
+  villager: 0.68,      // instance scale of the 0.40-tall villager model (was 1.1 -> 0.44 tall; now ~0.27)
+  villagerBob: 0.6,    // walk bob / greeting hop amplitude, relative to the old values
+  villagerStride: 1.6, // walk-cycle steps per unit distance, relative to the old rate (shorter legs step more often)
+  grassY: 0.3,         // flora blade height factor (was 0.58)
+  grassXZ: 0.5,        // flora blade footprint factor (was 0.58; kept wider than the height cut so ground stays covered)
+  treeY: 1.1,          // tree trunk + crown height factor (was 0.58, shared with the blades)
+  treeXZ: 1.15,        // tree crown footprint factor
+};
+
+// GLSL float literal (always with a decimal point)
+function glslF(x) { return Number.isInteger(x) ? x.toFixed(1) : String(x); }
+
 // ---- gl/villagers.js ----
 // Cloaked figurine: pid 0 cloak, 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
 function createVillagerGeometry() {
@@ -3015,7 +3033,7 @@ function createVillagers(caps) {
   mesh.receiveShadow = true;
 
   const m = new THREE.Matrix4(), nrm = new THREE.Vector3(), nrmS = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3(), pos = new THREE.Vector3();
-  const SCALE = 1.1;
+  const SCALE = SIZE.villager;
   const sa = state.array;
 
   // Orient along velocity, pitch into the slope, bob with the walk cycle (spec 4.2 Pool 3).
@@ -3027,8 +3045,9 @@ function createVillagers(caps) {
       const gzs = (sampleGrid(elev, x, z + 0.1) - sampleGrid(elev, x, z - 0.1)) / 0.2;
       const moving = civ.vVX[i] * civ.vVX[i] + civ.vVZ[i] * civ.vVZ[i] > 0.004;
       const st = civ.vState[i];
-      let bob = moving ? Math.abs(Math.sin(civ.vPhase[i])) * 0.03 : 0;
-      if (st === ST_GREET) bob = Math.abs(Math.sin(civ.vTimer[i] * 9)) * 0.07;
+      const ph = civ.vPhase[i] * SIZE.villagerStride;
+      let bob = moving ? Math.abs(Math.sin(ph)) * 0.03 * SIZE.villagerBob : 0;
+      if (st === ST_GREET) bob = Math.abs(Math.sin(civ.vTimer[i] * 9)) * 0.07 * SIZE.villagerBob;
       const y = sampleGrid(elev, x, z) + bob;
       nrm.set(-gxs, 1, -gzs).normalize();
       const h = civ.vHeading[i];
@@ -3041,7 +3060,7 @@ function createVillagers(caps) {
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);
       const o = i * 4;
-      sa[o] = civ.vRole[i]; sa[o + 1] = civ.vCargo[i]; sa[o + 2] = civ.vPhase[i];
+      sa[o] = civ.vRole[i]; sa[o + 1] = civ.vCargo[i]; sa[o + 2] = ph;
       sa[o + 3] = st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;
     }
     mesh.instanceMatrix.needsUpdate = true;
@@ -3293,7 +3312,9 @@ const GLSL_FLORA_VERT_POS = /* glsl */`
   float hgt = mix(0.22, 1.0, smoothstep(0.08, 0.85, fert)) * grow * (1.0 - 0.8 * comp) * (0.8 + 0.5 * arche);
   hgt *= 1.0 - smoothstep(0.015, 0.04, wat);
   float wid = mix(0.6, 1.0, hgt);
-  vec3 transformed = position * vec3(wid, hgt, wid) * 0.58 * vis;
+  // blades and tree parts are sized separately (SIZE in scale.js): short grass, trees well above the cottages
+  vec2 pS = part > 0.25 ? vec2(${glslF(SIZE.treeXZ)}, ${glslF(SIZE.treeY)}) : vec2(${glslF(SIZE.grassXZ)}, ${glslF(SIZE.grassY)});
+  vec3 transformed = position * vec3(wid * pS.x, hgt * pS.y, wid * pS.x) * vis;
 
   float t = uTime;
   float gust = 0.5 + 0.5 * sin(t * 0.7 + fBase.x * 0.35 + fBase.z * 0.21);
@@ -3402,14 +3423,14 @@ function createFloraGeometry() {
   }
   // stem: 3-sided prism
   for (let k = 0; k < 3; k++) {
-    const a0 = (k / 3) * Math.PI * 2, a1 = ((k + 1) / 3) * Math.PI * 2, r = 0.022, hs = 0.52;
+    const a0 = (k / 3) * Math.PI * 2, a1 = ((k + 1) / 3) * Math.PI * 2, r = 0.026, hs = 0.42;
     const p0 = [Math.cos(a0) * r, 0, Math.sin(a0) * r], p1 = [Math.cos(a1) * r, 0, Math.sin(a1) * r];
     const q0 = [Math.cos(a0) * r * 0.7, hs, Math.sin(a0) * r * 0.7], q1 = [Math.cos(a1) * r * 0.7, hs, Math.sin(a1) * r * 0.7];
     tri(p0, p1, q0, [0.5, 0], [0.5, 0], [0.5, 0.7]);
     tri(p1, q1, q0, [0.5, 0], [0.5, 0.7], [0.5, 0.7]);
   }
   // canopy: squashed octahedron-ish crown
-  const cy = 0.62, rx = 0.2, ry = 0.17;
+  const cy = 0.6, rx = 0.27, ry = 0.25;   // fuller crown over a shorter trunk (Phase 1b; was 0.62 / 0.2 / 0.17)
   const top = [0, cy + ry, 0], bot = [0, cy - ry * 0.7, 0];
   const ring = [];
   for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2 + 0.3; ring.push([Math.cos(a) * rx, cy + 0.02, Math.sin(a) * rx]); }

@@ -3,6 +3,7 @@ import { SHARED } from './shared.js';
 import { GLSL_VILL_PARS, GLSL_VILL_POS, GLSL_VILL_FRAG_COLOR, GLSL_VILL_FRAG_EMISSIVE, GLSL_SHADE_FRAG } from './glsl_civ.js';
 import { kitNew, kitBox, kitFrustum, kitPyramid, kitFinish } from './geomkit.js';
 import { sampleGrid } from '../sim/sample.js';
+import { SIZE } from './scale.js';
 import { ST_PROCESSION, ST_GREET, ROLE_MYSTIC } from '../sim/civ.js';
 import { TUNING } from '../sim/tuning.js';
 
@@ -46,7 +47,7 @@ export function createVillagers(caps) {
   mesh.receiveShadow = true;
 
   const m = new THREE.Matrix4(), nrm = new THREE.Vector3(), nrmS = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3(), pos = new THREE.Vector3();
-  const SCALE = 1.1;
+  const SCALE = SIZE.villager;
   const sa = state.array;
 
   // Orient along velocity, pitch into the slope, bob with the walk cycle (spec 4.2 Pool 3).
@@ -58,8 +59,9 @@ export function createVillagers(caps) {
       const gzs = (sampleGrid(elev, x, z + 0.1) - sampleGrid(elev, x, z - 0.1)) / 0.2;
       const moving = civ.vVX[i] * civ.vVX[i] + civ.vVZ[i] * civ.vVZ[i] > 0.004;
       const st = civ.vState[i];
-      let bob = moving ? Math.abs(Math.sin(civ.vPhase[i])) * 0.03 : 0;
-      if (st === ST_GREET) bob = Math.abs(Math.sin(civ.vTimer[i] * 9)) * 0.07;
+      const ph = civ.vPhase[i] * SIZE.villagerStride;
+      let bob = moving ? Math.abs(Math.sin(ph)) * 0.03 * SIZE.villagerBob : 0;
+      if (st === ST_GREET) bob = Math.abs(Math.sin(civ.vTimer[i] * 9)) * 0.07 * SIZE.villagerBob;
       const y = sampleGrid(elev, x, z) + bob;
       nrm.set(-gxs, 1, -gzs).normalize();
       const h = civ.vHeading[i];
@@ -72,7 +74,7 @@ export function createVillagers(caps) {
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);
       const o = i * 4;
-      sa[o] = civ.vRole[i]; sa[o + 1] = civ.vCargo[i]; sa[o + 2] = civ.vPhase[i];
+      sa[o] = civ.vRole[i]; sa[o + 1] = civ.vCargo[i]; sa[o + 2] = ph;
       sa[o + 3] = st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;
     }
     mesh.instanceMatrix.needsUpdate = true;

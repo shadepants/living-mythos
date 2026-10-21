@@ -1,4 +1,5 @@
 import { GLSL_SIM } from './glsl.js';
+import { SIZE, glslF } from './scale.js';
 
 export const GLSL_FLORA_VERT_PARS = /* glsl */`
 attribute vec4 aInstanceState;
@@ -37,7 +38,9 @@ export const GLSL_FLORA_VERT_POS = /* glsl */`
   float hgt = mix(0.22, 1.0, smoothstep(0.08, 0.85, fert)) * grow * (1.0 - 0.8 * comp) * (0.8 + 0.5 * arche);
   hgt *= 1.0 - smoothstep(0.015, 0.04, wat);
   float wid = mix(0.6, 1.0, hgt);
-  vec3 transformed = position * vec3(wid, hgt, wid) * 0.58 * vis;
+  // blades and tree parts are sized separately (SIZE in scale.js): short grass, trees well above the cottages
+  vec2 pS = part > 0.25 ? vec2(${glslF(SIZE.treeXZ)}, ${glslF(SIZE.treeY)}) : vec2(${glslF(SIZE.grassXZ)}, ${glslF(SIZE.grassY)});
+  vec3 transformed = position * vec3(wid * pS.x, hgt * pS.y, wid * pS.x) * vis;
 
   float t = uTime;
   float gust = 0.5 + 0.5 * sin(t * 0.7 + fBase.x * 0.35 + fBase.z * 0.21);

@@ -62,7 +62,7 @@ export const TUNING = Object.freeze({
   structureCap: 600,
   dwellingCap: 40,
   startDwellings: 14,
-  walkSpeed: 0.42,         // world units/s (was 0.55; slowed 2026-10-21, Jordan: villagers a little too fast)
+  walkSpeed: 0.30,         // world units/s: ~1.1 body heights/s for the ~0.27-tall villagers (Phase 1b; 0.55 -> 0.42 -> 0.30)
   slopePenalty: 10,        // speed divisor: 1 + slope * this
   frustrateRate: 0.35,     // frustration/s added per villager standing on a steep or wet uncovered cell
   frustrateDecay: 0.01,    // 1/s everywhere
@@ -76,7 +76,7 @@ export const TUNING = Object.freeze({
   maxWorks: 40,            // total bridges / stairs / paving the community will ever build
   ruinFertility: 0.22,
   ruinRate: 0.045,         // decay/s when local fertility is below ruinFertility
-  foodPerDwelling: 360,    // was 55: the town filled to the 40-dwelling cap within one real minute
+  foodPerDwelling: 260,    // was 55 (cap within one real minute) -> 360 -> 260 to keep that pace at walkSpeed 0.30
 
   // island shape
   rimRadius: 0.92,

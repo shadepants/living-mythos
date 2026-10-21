@@ -132,3 +132,8 @@ trampling and foraging clear them; homes keep their fields open. Packed into `uS
 migrate). Debug hook `window.__mythos.advance(simSeconds)` fast-forwards the real sim for "minutes later" frames on
 llvmpipe. Details and measurements in `docs/PLAN-sim-upgrade.md` Phase 1.
 
+## Asset sizing (Phase 1b, 2026-10-21)
+Sizes are in `src/gl/scale.js`. Villagers ~0.27 tall (were 0.44, taller than cottage walls), grass much shorter, trees
+taller with fuller crowns. Walking slowed to 0.30 u/s to match the smaller bodies, food per dwelling 260 to keep the
+town's growth pace. Close-up frames: `node tools/snap.mjs out.png --eval "$(cat tools/snap-village.js)"`.
+

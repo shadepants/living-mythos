@@ -28,14 +28,14 @@ export function createFloraGeometry() {
   }
   // stem: 3-sided prism
   for (let k = 0; k < 3; k++) {
-    const a0 = (k / 3) * Math.PI * 2, a1 = ((k + 1) / 3) * Math.PI * 2, r = 0.022, hs = 0.52;
+    const a0 = (k / 3) * Math.PI * 2, a1 = ((k + 1) / 3) * Math.PI * 2, r = 0.026, hs = 0.42;
     const p0 = [Math.cos(a0) * r, 0, Math.sin(a0) * r], p1 = [Math.cos(a1) * r, 0, Math.sin(a1) * r];
     const q0 = [Math.cos(a0) * r * 0.7, hs, Math.sin(a0) * r * 0.7], q1 = [Math.cos(a1) * r * 0.7, hs, Math.sin(a1) * r * 0.7];
     tri(p0, p1, q0, [0.5, 0], [0.5, 0], [0.5, 0.7]);
     tri(p1, q1, q0, [0.5, 0], [0.5, 0.7], [0.5, 0.7]);
   }
   // canopy: squashed octahedron-ish crown
-  const cy = 0.62, rx = 0.2, ry = 0.17;
+  const cy = 0.6, rx = 0.27, ry = 0.25;   // fuller crown over a shorter trunk (Phase 1b; was 0.62 / 0.2 / 0.17)
   const top = [0, cy + ry, 0], bot = [0, cy - ry * 0.7, 0];
   const ring = [];
   for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2 + 0.3; ring.push([Math.cos(a) * rx, cy + 0.02, Math.sin(a) * rx]); }

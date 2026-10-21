@@ -375,7 +375,8 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   for (let i = 0; i < GRID_N; i++) { const x = i % 128, zz = (i / 128) | 0; if (x > 20 && x < 108 && zz > 20 && zz < 108 && w.water[i] > 0.04 && w.mask[i] === 0 && Math.hypot(w.vx[i], w.vz[i]) > 0.3) { river = i; break; } }
   const mcur = { i: w.events.head };
   const hasBridgeMyth = () => { for (let k = 0; k < w.civ.nM; k++) if (w.civ.mKind[k] === 1) return k; return -1; };
-  for (let i = 0; i < 40 * 40 && hasBridgeMyth() < 0; i++) { w.frustration[river] = Math.max(w.frustration[river], w.civ.bridges === 0 ? 0.9 : 0); simStep(w); }
+  // 90 sim s: walk (0.30 u/s) + buildTime 20 s
+  for (let i = 0; i < 40 * 90 && hasBridgeMyth() < 0; i++) { w.frustration[river] = Math.max(w.frustration[river], w.civ.bridges === 0 ? 0.9 : 0); simStep(w); }
   const bm = hasBridgeMyth();
   check('myths: the first bridge becomes a myth with a carved stone', bm >= 0 && w.civ.sKind[w.civ.mStruct[bm]] === KIND_MYTH, `nM ${w.civ.nM}, bridges ${w.civ.bridges}`);
   let mythEv = 0, kq; while ((kq = nextEvent(w.events, mcur)) >= 0) if (w.events.type[kq] === 9) mythEv++;
@@ -392,7 +393,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   const sx = wa.civ.mX[0], sz = wa.civ.mZ[0];
   for (let v = 0; v < 120; v++) { wa.civ.vX[v] = sx + ((v * 7) % 13 - 6) * 0.25; wa.civ.vZ[v] = sz + ((v * 5) % 11 - 5) * 0.25; }
   let maxNear = 0;
-  for (let i = 0; i < 40 * 135; i++) {
+  for (let i = 0; i < 40 * 150; i++) {   // anniversary at 120 s, then ~30 s to walk over at 0.30 u/s
     simStep(wa);
     if (wa.stats.time - wa.civ.mT0[0] > 121 && i % 20 === 0) { let n = 0; for (let v = 0; v < 120; v++) if (Math.hypot(wa.civ.vX[v] - sx, wa.civ.vZ[v] - sz) < 1.0) n++; maxNear = Math.max(maxNear, n); }
   }
