@@ -29,16 +29,30 @@ export function createParticlePool() {
   for (let i = 0; i < n; i++) { ma[i * 16] = 1; ma[i * 16 + 5] = 1; ma[i * 16 + 10] = 1; ma[i * 16 + 15] = 1; }
   const sa = state.array, va = vel.array;
 
+  // Live particles are scattered over the ring buffer; pack them into slots 0..k-1 so only k instances are drawn and
+  // uploaded (the shaders never use the instance index, so slot order does not matter).
+  mesh.count = 0;
   mesh.userData.update = function update(p) {
+    let k = 0;
     for (let i = 0; i < n; i++) {
-      const o = i * 4;
-      if (!p.alive[i]) { sa[o + 2] = 0; continue; }
-      ma[i * 16 + 12] = p.x[i]; ma[i * 16 + 13] = p.y[i]; ma[i * 16 + 14] = p.z[i];
+      if (!p.alive[i]) continue;
+      const o = k * 4;
+      ma[k * 16 + 12] = p.x[i]; ma[k * 16 + 13] = p.y[i]; ma[k * 16 + 14] = p.z[i];
       sa[o] = p.type[i]; sa[o + 1] = p.life[i] / p.maxLife[i]; sa[o + 2] = p.size[i]; sa[o + 3] = p.aux[i];
       va[o] = p.vx[i]; va[o + 1] = p.vy[i]; va[o + 2] = p.vz[i]; va[o + 3] = p.spin[i];
+      k++;
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    state.needsUpdate = true; vel.needsUpdate = true;
+    // with nothing alive, keep one zero-size instance in the draw: a zero-count pool is skipped before its program
+    // compiles, which would move a shader compile hitch to the first rockfall (and the smoke test counts programs)
+    if (k === 0) {
+      mesh.count = 1;
+      if (sa[2] !== 0) { sa[2] = 0; state.clearUpdateRanges(); state.addUpdateRange(0, 4); state.needsUpdate = true; }
+      return;
+    }
+    mesh.count = k;
+    mesh.instanceMatrix.clearUpdateRanges(); mesh.instanceMatrix.addUpdateRange(0, k * 16); mesh.instanceMatrix.needsUpdate = true;
+    state.clearUpdateRanges(); state.addUpdateRange(0, k * 4); state.needsUpdate = true;
+    vel.clearUpdateRanges(); vel.addUpdateRange(0, k * 4); vel.needsUpdate = true;
   };
   return mesh;
 }

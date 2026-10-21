@@ -152,7 +152,8 @@ export function createController(o) {
 
     // tool effects (applied at the spring-filtered position)
     let rain = 0, breeze = 0;
-    if (tool === TOOL_SCULPT && using && st.sInit) {
+    // a held press dragged off the island pauses sculpting (else it keeps digging at the frozen cursor); tap bursts still run
+    if (tool === TOOL_SCULPT && using && st.sInit && (st.hitOk || !st.active)) {
       sculptAt(world, sx, sz, st.radius, (alt ? -1 : 1) * 0.9 * dt);
       st.sculptClock += dt; st.rockClock += dt;
       if (st.sculptClock > 0.28) { st.sculptClock = 0; emitEvent(world.events, EV_SCULPT, sx, sz, alt ? -1 : 1); }

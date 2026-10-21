@@ -29,7 +29,7 @@ export function createCiv() {
     vX: f(nV), vZ: f(nV), vVX: f(nV), vVZ: f(nV), vTX: f(nV), vTZ: f(nV), vCargo: f(nV), vEnergy: f(nV), vPhase: f(nV), vTimer: f(nV), vHeading: f(nV),
     vRole: new Uint8Array(nV), vState: new Uint8Array(nV),
     vHome: new Int32Array(nV).fill(-1), vJob: new Int32Array(nV).fill(-1), vAux: new Int32Array(nV).fill(-1),
-    nS: 0, dwellings: 0,
+    nS: 0, dwellings: 0, sEpoch: 0,   // sEpoch: bumped when an existing slot moves, so the renderer rewrites its matrices
     sX: f(nS), sZ: f(nS), sRot: f(nS), sBias: f(nS), sBuild: f(nS), sDecay: f(nS), sLum: f(nS), sDirX: f(nS), sDirZ: f(nS), sLen: f(nS),
     sKind: new Uint8Array(nS), sActive: new Uint8Array(nS),
     oX: f(MAX_ORDERS), oZ: f(MAX_ORDERS), oDirX: f(MAX_ORDERS), oDirZ: f(MAX_ORDERS), oLen: f(MAX_ORDERS), oProg: f(MAX_ORDERS), oDust: f(MAX_ORDERS),
@@ -218,6 +218,8 @@ function decide(world, v) {
       const a = rng.next() * 6.283;
       bestU = u; bestA = ST_PROCESSION;
       tx = world.monoliths[mono * 4] + Math.cos(a) * 0.75; tz = world.monoliths[mono * 4 + 1] + Math.sin(a) * 0.75; civ.vAux[v] = mono;
+      const r = Math.sqrt(tx * tx + tz * tz);   // a monolith near the rim must not send the circle past the cliff (walk cost spikes beyond 8.5)
+      if (r > 8.3) { tx *= 8.3 / r; tz *= 8.3 / r; }
     }
   }
   // mystics wander out to re-consecrate ruins
@@ -295,7 +297,7 @@ export function recordMyth(world, kind, x, z) {
   const dirYaw = Math.atan2(-sx, -sz);   // the stone faces the island's centre
   let st = civ.mStruct[slot];
   if (st < 0) st = addStructure(civ, KIND_MYTH, sx, sz, civ.mSeed[slot], 1, Math.sin(dirYaw), Math.cos(dirYaw), 1);
-  else { civ.sX[st] = sx; civ.sZ[st] = sz; civ.sBias[st] = civ.mSeed[slot]; civ.sDecay[st] = 0; }
+  else { civ.sX[st] = sx; civ.sZ[st] = sz; civ.sBias[st] = civ.mSeed[slot]; civ.sDecay[st] = 0; civ.sEpoch++; }
   if (st >= 0) { civ.mStruct[slot] = st; civ.sRot[st] = dirYaw; civ.sDirX[st] = Math.sin(dirYaw); civ.sDirZ[st] = Math.cos(dirYaw); civ.sLen[st] = 1; }
   emitEvent(world.events, EV_MYTH, sx, sz, slot);
   return slot;
@@ -624,7 +626,7 @@ function syncMonoliths(world, dt) {
       civ.sRot[s] = world.rng.next() * 6.283;
       civ.monoStruct[k] = s; civ.monoX[k] = m[k * 4]; civ.monoZ[k] = m[k * 4 + 1];
     } else if (civ.monoX[k] !== m[k * 4] || civ.monoZ[k] !== m[k * 4 + 1]) {
-      civ.sX[s] = m[k * 4]; civ.sZ[s] = m[k * 4 + 1]; civ.sBuild[s] = 0;
+      civ.sX[s] = m[k * 4]; civ.sZ[s] = m[k * 4 + 1]; civ.sBuild[s] = 0; civ.sEpoch++;
       civ.monoX[k] = m[k * 4]; civ.monoZ[k] = m[k * 4 + 1];
     }
     if (civ.sBuild[s] < 1) civ.sBuild[s] = Math.min(1, civ.sBuild[s] + dt / 1.5);

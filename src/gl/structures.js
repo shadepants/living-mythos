@@ -124,7 +124,7 @@ export function createStructures(caps) {
   mesh.count = 0;
 
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pv = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
-  let placed = 0, glowClock = 0;
+  let placed = 0, epoch = 0, glowClock = 0;
   const gl = SHARED.uGlow.value;
 
   // Sync instance buffers from the sim every frame (allocation-free).
@@ -133,6 +133,7 @@ export function createStructures(caps) {
     const n = civ.nS;
     mesh.count = n;
     mesh.visible = n > 0;
+    if (civ.sEpoch !== epoch) { epoch = civ.sEpoch; placed = 0; }   // a recycled monolith/myth slot moved: rewrite all matrices
     for (; placed < n; placed++) {
       pv.set(civ.sX[placed], 0, civ.sZ[placed]);
       const k = civ.sKind[placed];

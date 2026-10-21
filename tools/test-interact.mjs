@@ -86,6 +86,11 @@ await page.mouse.move(sx, sy); await page.keyboard.down('Shift'); await page.mou
 check('Shift+click carves', (await elevAt(target.x, target.z)) < e2 - 0.05);
 const camAfter = await ev(() => window.__mythos.camera.position.toArray());
 check('sculpting does not orbit the camera', camBefore.every((v, i) => Math.abs(v - camAfter[i]) < 1e-3));
+// press on the island, drag into the sky and keep holding: sculpting pauses instead of digging at the frozen cursor
+await page.mouse.move(sx, sy); await page.mouse.down(); await page.mouse.move(8, 8, { steps: 2 }); await sleep(120);
+const eOff0 = await elevAt(target.x, target.z); await sleep(900);
+const eOff1 = await elevAt(target.x, target.z); await page.mouse.up();
+check('holding sculpt off the island does not keep digging', Math.abs(eOff1 - eOff0) < 0.03, `${eOff0.toFixed(3)} -> ${eOff1.toFixed(3)}`);
 
 // audio: the first gesture unlocks a real AudioContext and sculpting plays notes
 const au = await ev(() => { const a = window.__mythos.audio; return { ready: a.ready, order: a.order, state: a.ctx && a.ctx.state }; });
@@ -130,6 +135,13 @@ check('Monsoon raises rainfall in the simulation (loop: weather -> water)', wx1.
 check('Monsoon cuts evaporation and changes crop growth', wx1.evap < wx0.evap - 0.3 && wx1.grow !== wx0.grow, `evapMul ${wx0.evap.toFixed(2)} -> ${wx1.evap.toFixed(2)}, ecoGrow ${wx0.grow.toFixed(2)} -> ${wx1.grow.toFixed(2)}`);
 const pool = await ev(() => ({ sim: window.__mythos.world.civ.nS, gpu: window.__mythos.structures.count }));
 check('the structure pool mirrors the live simulation', pool.gpu === pool.sim && pool.sim >= 8, `${pool.gpu}/${pool.sim}`);
+// a recycled monolith slot (the 9th placement reuses the oldest) must move its obelisk on the GPU too
+const moSlot = await ev(() => { const m = window.__mythos.world.monoliths; for (let k = 0; k < 8; k++) if (m[k * 4 + 3] !== 0) return k; m[3] = 1; m[0] = 1.0; m[1] = 1.0; return 0; });
+await sleep(300);
+await ev((k) => { const m = window.__mythos.world.monoliths; m[k * 4] = -2.5; m[k * 4 + 1] = 2.0; }, moSlot);
+await sleep(300);
+const moved = await ev((k) => { const M = window.__mythos; const s = M.world.civ.monoStruct[k]; const a = M.structures.instanceMatrix.array; return { s, x: a[s * 16 + 12], z: a[s * 16 + 14] }; }, moSlot);
+check('a recycled monolith slot moves its obelisk on the GPU', moved.s >= 0 && Math.abs(moved.x + 2.5) < 1e-4 && Math.abs(moved.z - 2.0) < 1e-4, `slot ${moSlot} struct ${moved.s} at ${moved.x?.toFixed(2)},${moved.z?.toFixed(2)}`);
 
 // atmosphere buttons
 await page.click('#dock button:nth-child(8)');
@@ -152,9 +164,13 @@ await page.touchscreen.touchStart(tx, ty); await sleep(1100); await page.touchsc
 const te1 = await elevAt(1.5, -1.0);
 check('touch long-press carves', te1 < te0 - 0.05, `${te0.toFixed(2)} -> ${te1.toFixed(2)}`);
 const te2cam = await ev(() => window.__mythos.camera.position.toArray());
+const sc0 = await ev(() => window.__mythos.ctl.st.sculptClock);
 await page.touchscreen.touchStart(tx, ty); await page.touchscreen.touchMove(tx + 80, ty + 20); await sleep(200); await page.touchscreen.touchEnd();
+const sc1 = await ev(() => window.__mythos.ctl.st.sculptClock);
 const te3cam = await ev(() => window.__mythos.camera.position.toArray());
-check('touch drag orbits instead of sculpting', te2cam.some((v, i) => Math.abs(v - te3cam[i]) > 0.02) && Math.abs((await elevAt(1.5, -1.0)) - te1) < 0.02);
+const te3e = await elevAt(1.5, -1.0), camMove = Math.max(...te2cam.map((v, i) => Math.abs(v - te3cam[i])));
+// sculptClock only advances while sculpting is applied (elevation alone is noisy: a freshly carved pit silts up on its own)
+check('touch drag orbits instead of sculpting', camMove > 0.02 && sc1 === sc0, `camera moved ${camMove.toFixed(3)}, sculptClock ${sc0.toFixed(3)} -> ${sc1.toFixed(3)}, elev ${te1.toFixed(3)} -> ${te3e.toFixed(3)}`);
 
 // photo mode: P hides the UI, renders a hi-res frame, saves it and brings the UI back
 const ph0 = await ev(() => window.__mythos.photo.count);

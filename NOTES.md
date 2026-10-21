@@ -2,16 +2,9 @@
 
 ## Status
 - **Current milestone:** M10 done and VERIFIED ON THE DEVICE: it runs on the Pixel's own GPU (PowerVR D-Series DXT-48-1536, ANGLE/GLES 3.2) at ~59 fps average with no WebGL context loss over a 150 s soak and no errors; frames from that GPU are in `docs/screens/phone-portrait.png`. Real finger touch was verified on the device too (see below).
-- **Headless Chrome (OLD, superseded below):** `~/.cache/ms-playwright/chromium_headless_shell-*` exists; `tools/smoke.mjs`
-  drives it via puppeteer-core. SwiftShader's GPU process **segfaults ~1s after the first draw in this PRoot**
-  (every flag combo tried), so there are **no screenshots/pixel checks**. But shader compile/link errors and JS
-  exceptions DO surface first (verified by injecting a deliberate GLSL error), and `?debug=1` logs
-  `programs compiled: N` (expect 6 from M2). So: smoke = compile + boot check; the user must eyeball visuals.
+- **How it is verified:** on the phone's own Chrome (real GPU, touch; see "phone" notes below) and in headless Chrome on Mesa **llvmpipe** (software GL) for mouse/keyboard/tests. SwiftShader's GPU process segfaults ~1 s after the first draw in this PRoot, so don't use it; the working flags are in the llvmpipe note below. `tools/smoke.mjs` drives headless Chrome via puppeteer-core; `?debug=1` logs GL caps and `programs compiled: N`.
 - `tools/test-geo.mjs` checks grid winding and skirt geometry in Node (three is a devDependency).
-- (old) Verification at M0: build + static audit + `node --check` of the inlined bundle pass.
-  **Not yet run in a browser** (no Chromium in this PRoot). Open `dist/index.html` on-device
-  (or `python3 -m http.server` in `dist/`) and expect a rotating normal-shaded octahedron on a dark
-  purple background. Add `?debug=1` to log detected GL caps to the console.
+- Open `dist/index.html` on-device (or `python3 -m http.server` in `dist/`); add `?debug=1` to log detected GL caps to the console.
 
 ## Commands
 - `npm test` runs `node --expose-gc tools/test-sim.mjs` (add `-- --map` for an ASCII island map).
@@ -117,3 +110,11 @@ Not covered: palm rejection / very long sessions / other devices.
 - **Shadows**: terrain shadows from the heightfield march plus soft ellipse shadows of dwellings/monoliths/myth stones stamped into the same shade field (`stampObjectShadows`).
 - **Lushness**: soil quality now shapes moisture retention (evaporation / soil^2) and the fertility target (sm x (0.35 + 0.8 soil)); palette thresholds moved so mid fertility reads green. After a minute: fertility spread ~evenly 0..1, ~25% fully lush, ~13% scrub; screenshots `docs/screens/island-topdown.png`, `waterfall.png`.
 - Phone re-check of this build: 58 s, 59 fps avg (min 41), mid tier, 11 programs, 0 errors, no context loss.
+
+## External code review (Gemini 3.1 + Gemini 4, 2026-10-21)
+Source bundle uploaded as one text file (Gemini's GitHub "Import code" read the repo as a binary blob). Every finding was checked against the code; fixed ones have regression tests that fail on the old code.
+- **Fixed:** recycled monolith / myth-stone slots kept their old instance matrix (obelisk drawn at the old spot) — `civ.sEpoch` bump + rewrite in `structures.js`; holding sculpt and dragging off the island kept digging at the frozen cursor — paused while a held press is off-island (tap bursts unaffected); particles drew from `world.rng` once per render frame, making the sim frame-rate dependent (SPEC 2.4) — they use `Math.random` now; procession targets could land past the cliff (monolith r<=8.4 + 0.75) — clamped to r 8.3; the particle pool uploaded and drew all 1000 slots every frame — live particles are packed into the front slots and only that range is drawn/uploaded (one zero-size instance when idle so the program still compiles at boot).
+- **Rejected after checking:** stuck touch counter / OrbitControls pointer leak (OrbitControls captures the pointer and removes it regardless of `enabled`); `scanForOrders` off-grid reads (the grid border is always rim); stale `rimOut` (`drainRim` is only turned off by tests); audio filter-automation "leak" (updates are throttled to 20 Hz and use the SPEC's own `setTargetAtTime`); stolen-voice ramp clicks (the offline render forces stealing and measures no pops); full-grid water mesh and the shared structure super-mesh (design choices, phone holds ~59 fps).
+- **Open, low:** the 8-notes-per-frame cap (SPEC) can drop a myth leitmotif in a big burst of events; the structure state/kind attributes are re-uploaded every frame (~19 KB).
+- `test-interact`'s touch-drag check now uses `ctl.st.sculptClock` instead of elevation (a fresh pit silts up on its own and made it flaky).
+- Phone re-check of the fixed build (2026-10-21): 186 s, fps 60-82, worst frame 33 ms, sim 1.3-2.2 ms, 12 programs, 0 errors, no context loss, heap 13 MB. Chrome was in "Desktop site" mode (980 px layout on a 444 px screen), which shrinks `MOVE_PX` to ~4.5 real px so every tap read as a drag (0 taps / 118 touches) — the monolith and off-island fixes were covered by `test-interact` only. If taps misbehave again, scale `MOVE_PX` by `innerWidth / screen.width`.

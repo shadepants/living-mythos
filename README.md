@@ -42,4 +42,4 @@ node tools/snap.mjs out.png --query atmo=0.5   # render a real frame (software G
 node tools/shoot-tools.mjs dir           # drive the four tools with the mouse and save frames
 node tools/phone-server.mjs 8765 /tmp/phone   # then termux-open-url 'http://localhost:8765/?report=x&debug=1' — run it on the phone itself and read fps/GPU/errors/snapshot back
 ```
-See NOTES.md for architecture notes, tuning history and the one big caveat (visuals not yet seen by a human).
+See NOTES.md for architecture notes, tuning history and on-device results (verified on the Pixel's GPU at ~59 fps with real touch; the audio has not yet been heard by a human).

@@ -28,9 +28,11 @@ function spawn(p, type, x, y, z, vx, vy, vz, life, size, aux) {
 }
 
 // world: sim world; wind: {x,z,amp}; camera target for ambient rain; rainAmt 0..1 (monsoon), cloud {x,y,z,on}
+const FX_RNG = { next: Math.random };
+
 export function stepParticles(p, world, dt, time, rainAmt, windAmp, cloudOn, cx, cy, cz, tx, tz) {
   const civ = world.civ;
-  const rng = world.rng;
+  const rng = FX_RNG;   // never world.rng: this runs per render frame, so drawing from it would make the sim depend on frame rate (SPEC 2.4)
 
   // -------- events -> spawns --------
   let k;

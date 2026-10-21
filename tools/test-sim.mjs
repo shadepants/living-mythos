@@ -397,6 +397,12 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   global.gc();
   const grew = process.memoryUsage().heapUsed - h0;
   check('zero-GC: stepParticles does not grow the heap', grew < 256 * 1024, `${(grew / 1024).toFixed(1)} KB`);
+  // particles run per render frame, so they must not draw from the seeded sim RNG (determinism, SPEC 2.4)
+  for (let k = 0; k < w.rimCells.length; k++) w.rimOut[w.rimCells[k]] = 0.01;
+  const rngBefore = w.rng.s;
+  for (let t = 0; t < 300; t++) stepParticles(p, w, 0.016, t * 0.016, 0.6, 0.8, false, 0, 0, 0, 0, 0);
+  w.rimOut.fill(0);
+  check('particles never advance the seeded sim RNG', w.rng.s === rngBefore, `${rngBefore} -> ${w.rng.s}`);
   void P_SPRAY;
 }
 
