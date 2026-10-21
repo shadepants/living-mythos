@@ -104,7 +104,7 @@ export function createFlora(caps, count) {
     m.compose(p, q, sc);
     mesh.setMatrixAt(k, m);
     const o = k * 4;
-    state.array[o] = hash2(gx, gz, 53);                  // archetype 0..1 (tree if > 0.78)
+    state.array[o] = hash2(gx, gz, 53);                  // archetype 0..1 (with biomass, decides which tufts are trees)
     state.array[o + 1] = 0.75 + 0.5 * hash2(gx, gz, 59); // growth stage
     state.array[o + 2] = 0;                              // decay
     state.array[o + 3] = 0;                              // luminescence

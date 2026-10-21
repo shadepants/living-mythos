@@ -253,6 +253,7 @@ function arrive(world, v) {
     civ.vCargo[v] = Math.min(1, civ.vCargo[v] + 0.35);
     const i = cellOf(civ.vX[v], civ.vZ[v]);
     world.fertility[i] = Math.max(0, world.fertility[i] - 0.01);
+    world.biomass[i] = Math.max(0, world.biomass[i] - TUNING.forageClear);
   } else if (st === ST_HAUL) {
     civ.food += civ.vCargo[v] * 10;
     civ.vCargo[v] = 0;
@@ -504,6 +505,24 @@ function markCoverFor(world, x, z, dirX, dirZ, len, radius, kind) {
 
 function secondTick(world) {
   const civ = world.civ;
+  // farmers keep the ground around healthy homes open: biomass near a dwelling is pushed back toward crop level
+  // (without this, forest grows right up to the doors, since settlements sit on the most fertile ground)
+  {
+    const bm = world.biomass, R = TUNING.homeClearRadius, LVL = TUNING.homeClearLevel;
+    const rc = Math.ceil(R / 20 * GRID_W);
+    for (let s = 0; s < civ.nS; s++) {
+      if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] > 0.4) continue;
+      const gx = Math.round((civ.sX[s] + 10) / 20 * GRID_W - 0.5), gz = Math.round((civ.sZ[s] + 10) / 20 * GRID_H - 0.5);
+      for (let dz = -rc; dz <= rc; dz++) for (let dx = -rc; dx <= rc; dx++) {
+        const x = gx + dx, z = gz + dz;
+        if (x < 0 || z < 0 || x >= GRID_W || z >= GRID_H) continue;
+        const d = Math.sqrt(dx * dx + dz * dz) * 20 / GRID_W;
+        if (d > R) continue;
+        const i = z * GRID_W + x, lim = LVL + (1 - LVL) * (d / R) * (d / R);
+        if (bm[i] > lim) bm[i] -= (bm[i] - lim) * 0.25;
+      }
+    }
+  }
   // ruins: dwellings in barren ground slump; luminescence fades unless a monolith sustains it
   for (let s = 0; s < civ.nS; s++) {
     if (civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1) continue;

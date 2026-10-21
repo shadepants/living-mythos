@@ -375,6 +375,15 @@ function boot() {
       mods: { createAudioEngine, SCALES, degreeFreq, semiFreq, TIMBRE },
       world, ctl, atmo, camera, controls, flora, particles, structures, villagers, audio, director, photo, gov, save, takePhoto, restored,
       snapshot() { renderFrame(); return canvas.toDataURL('image/png'); },
+      // fast-forward the real simulation (for frames "a few minutes later" in software-GL tests)
+      advance(simSeconds) {
+        const n = Math.round(simSeconds / world.params.dt);
+        for (let k = 0; k < n; k++) simStep(world);
+        packSimTextures(world, simTex);
+        while (!stepShade(world, shadeState, SHARED.uSunDir.value, 128)) { /* finish a full shade sweep */ }
+        packShadeTexture(world, simTex);
+        return world.stats.time;
+      },
       project(x, y, z) {
         pv.set(x, y, z).project(camera);
         const r = canvas.getBoundingClientRect();

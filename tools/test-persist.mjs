@@ -32,7 +32,19 @@ const fresh = createWorld(1337);
 const before = Float32Array.from(fresh.elev);
 check('corrupt: garbage JSON is rejected', restoreWorld(fresh, '{not json').ok === false);
 check('corrupt: truncated array data is rejected', restoreWorld(fresh, text.replace(/"elev":"[^"]{40}/, '"elev":"AAAA')).ok === false);
-check('corrupt: wrong version is rejected', restoreWorld(fresh, text.replace('"v":1', '"v":99')).ok === false);
+check('corrupt: wrong version is rejected', restoreWorld(fresh, text.replace('"v":2', '"v":99')).ok === false);
+{ // a version-1 save (before biomass existed) still loads, and its vegetation is re-seeded from fertility
+  const old = JSON.parse(text); old.v = 1; delete old.w.biomass;
+  const wOld = createWorld(1337);
+  const rOld = restoreWorld(wOld, JSON.stringify(old));
+  let bsum = 0; for (let i = 0; i < wOld.biomass.length; i++) bsum += wOld.biomass[i];
+  check('migrate: a v1 save (no biomass) restores and re-seeds vegetation', rOld.ok && same(wOld.elev, a.elev) && bsum > 0, `ok ${rOld.ok}, biomass sum ${bsum.toFixed(1)}`);
+  const wRT = createWorld(1337);   // b has been simulated since its restore, so round-trip into a fresh world
+  check('restore: biomass round-trips in a current save', restoreWorld(wRT, text).ok && same(wRT.biomass, a.biomass));
+  const bad = JSON.parse(text); const arr = new Float32Array(a.biomass); arr[100] = 5;
+  bad.w.biomass = Buffer.from(arr.buffer).toString('base64');
+  check('corrupt: out-of-range biomass is rejected', restoreWorld(createWorld(1337), JSON.stringify(bad)).ok === false);
+}
 check('corrupt: a save from another seed is rejected', restoreWorld(createWorld(5), text).ok === false);
 const poisoned = JSON.parse(text); const e = new Float32Array(128 * 128).fill(99); poisoned.w.elev = Buffer.from(e.buffer).toString('base64');
 check('corrupt: out-of-range elevations are rejected', restoreWorld(fresh, JSON.stringify(poisoned)).ok === false);

@@ -1,10 +1,25 @@
 import { TUNING } from './tuning.js';
 import { GRID_W, GRID_H, GRID_N } from './grid.js';
 
+// Ceiling for standing vegetation: fertile, untrampled, dry ground can carry forest.
+export function biomassCap(fert, comp, water) {
+  let t = (fert - TUNING.biomassFertLo) / (TUNING.biomassFertHi - TUNING.biomassFertLo);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const k = 1 - comp;
+  return t * t * (3 - 2 * t) * k * k * (water > TUNING.biomassDrown ? 0 : 1);
+}
+
+// Boot / old-save seeding: start every cell part-way to its ceiling so forests visibly grow in during play.
+export function seedBiomass(world) {
+  const { fertility, compaction, water, mask, biomass } = world;
+  for (let i = 0; i < biomass.length; i++) biomass[i] = mask[i] === 1 ? 0 : TUNING.biomassSeed * biomassCap(fertility[i], compaction[i], water[i]);
+}
+
 // Soil moisture, crop/humus fertility, footpath relaxation and cultural drift (spec 3.3). Allocation-free.
 export function ecologyStep(world, dt) {
   const p = world.params;
-  const { elev, soil, water, moisture, fertility, compaction, culturalBias, mask, ecoTmp, frustration, engCover } = world;
+  const { elev, soil, water, moisture, fertility, compaction, culturalBias, mask, ecoTmp, frustration, engCover, biomass } = world;
+  const bGrow = TUNING.biomassGrow * p.ecoGrow * dt, bDecay = TUNING.biomassDecay * dt;
   const absorb = Math.min(1, TUNING.moistAbsorb * dt);
   const evap = TUNING.moistEvap * dt * p.evapMul;
   const rainGain = p.rain * dt * TUNING.moistFromRain;
@@ -15,7 +30,7 @@ export function ecologyStep(world, dt) {
   const fDecay = TUNING.frustrateDecay * dt, fCover = TUNING.coverDecay * dt;
 
   for (let i = 0; i < GRID_N; i++) {
-    if (mask[i] === 1) { moisture[i] = 0; fertility[i] = 0; compaction[i] = 0; continue; }
+    if (mask[i] === 1) { moisture[i] = 0; fertility[i] = 0; compaction[i] = 0; biomass[i] = 0; continue; }
     let wet = water[i] * TUNING.moistFromWater;
     if (wet > 1) wet = 1;
     let m = moisture[i];
@@ -32,6 +47,11 @@ export function ecologyStep(world, dt) {
     if (target > 1) target = 1;
     f += (target - f) * (target > f ? grow : decay + cdecay * c);
     fertility[i] = f > 1 ? 1 : f < 0 ? 0 : f;
+    // standing vegetation follows its ceiling slowly up (succession) and faster down (trampling, flooding)
+    const cap = biomassCap(fertility[i], c, water[i]);
+    const b = biomass[i];
+    const nb = b + (cap - b) * (cap > b ? bGrow : bDecay);
+    biomass[i] = nb > 1 ? 1 : nb < 0 ? 0 : nb;
     const cr = engCover[i] === 4 ? relax * 25 : relax;
     compaction[i] = c > cr ? c - cr : 0;
     const fr = frustration[i];

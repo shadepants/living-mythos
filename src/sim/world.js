@@ -20,6 +20,7 @@ export function createWorld(seed) {
     rimOut: f(),                         // water drained over the cliff by the last substep, per rim cell
     sedTmp: f(),                         // scratch for sediment advection
     ecoTmp: f(),                         // scratch for ecology diffusion
+    biomass: f(),                        // standing vegetation 0..1 (grass -> crops -> forest), saved
     shade: new Float32Array(GRID_N).fill(1),   // sun shadow factor from the heightfield (runtime only)
     soil: f(),                           // fixed soil quality 0.55..1.45 (regenerated from the seed, not saved)
     ecoCount: 0,

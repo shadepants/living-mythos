@@ -5,7 +5,7 @@ import { GRID_W, GRID_H, GRID_N } from '../sim/grid.js';
 export function createSimTextures(floatLinear) {
   const bufA = new Float32Array(GRID_N * 4);
   const bufB = new Float32Array(GRID_N * 4);
-  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows)
+  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows), B = biomass (vegetation)
   const filter = floatLinear ? THREE.LinearFilter : THREE.NearestFilter;
   const make = (buf) => {
     const t = new THREE.DataTexture(buf, GRID_W, GRID_H, THREE.RGBAFormat, THREE.FloatType);
@@ -33,6 +33,9 @@ export function packSimTextures(world, st) {
 // Shade factor (0 shadowed .. 1 lit) from the CPU heightfield march, into R of uSimTexC.
 export function packShadeTexture(world, st) {
   const sh = world.shade, c = st.bufC;
-  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) c[j] = sh[i];
+  // biomass rides along on the shade sweep's upload (~every 16 frames): it changes over minutes, and packing it
+  // every frame would re-upload the whole 256 KB texture each frame
+  const bm = world.biomass;
+  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) { c[j] = sh[i]; c[j + 2] = bm[i]; }
   st.texC.needsUpdate = true;
 }

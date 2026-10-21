@@ -127,6 +127,47 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   check('zero-GC: simStep (hydro+ecology) does not grow the heap', grew < 256 * 1024, `${(grew / 1024).toFixed(1)} KB`);
 }
 
+// 5b2. vegetation succession (biomass)
+{
+  const w = createWorld(23);
+  const idxMeadow = 64 * 128 + 50, idxTrod = 64 * 128 + 70, idxFlood = 64 * 128 + 90;
+  const patch = (c, fn) => { for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) fn(c + dz * 128 + dx); };
+  for (const c of [idxMeadow, idxTrod, idxFlood]) patch(c, (i) => { w.mask[i] = 0; w.fertility[i] = 0.9; w.water[i] = 0; w.elev[i] = 0.5; w.compaction[i] = 0; });
+  patch(idxMeadow, (i) => { w.biomass[i] = 0.1; });
+  patch(idxTrod, (i) => { w.biomass[i] = 0.9; });
+  patch(idxFlood, (i) => { w.biomass[i] = 0.9; });
+  w.params.rain = 0; w.params.ecoGrow = 1;
+  const hold = () => {
+    patch(idxMeadow, (i) => { w.moisture[i] = 0.85; });
+    patch(idxTrod, (i) => { w.moisture[i] = 0.85; w.compaction[i] = 0.9; });
+    patch(idxFlood, (i) => { w.moisture[i] = 0.85; w.water[i] = 0.1; });
+  };
+  const b0 = w.biomass[idxMeadow];
+  for (let k = 0; k < 600; k++) { hold(); ecologyStep(w, 0.5); }   // 300 sim s
+  check('biomass: an untouched fertile meadow grows toward forest', w.biomass[idxMeadow] > 0.6 && w.biomass[idxMeadow] > b0 + 0.4, `${b0.toFixed(2)} -> ${w.biomass[idxMeadow].toFixed(2)} (fert ${w.fertility[idxMeadow].toFixed(2)})`);
+  check('biomass: heavy trampling clears woodland', w.biomass[idxTrod] < 0.15, `0.90 -> ${w.biomass[idxTrod].toFixed(2)}`);
+  check('biomass: standing water drowns woodland', w.biomass[idxFlood] < 0.05, `0.90 -> ${w.biomass[idxFlood].toFixed(2)}`);
+  let ok = true;
+  for (let i = 0; i < GRID_N; i++) if (!(w.biomass[i] >= 0 && w.biomass[i] <= 1)) { ok = false; break; }
+  check('biomass: stays in range', ok);
+  // a real island: seeded part-way after prewarm, then forests thicken during play
+  const r = createWorld(1337); prewarm(r);
+  let seeded = 0, cnt = 0;
+  for (let i = 0; i < GRID_N; i++) if (r.mask[i] === 0) { seeded += r.biomass[i]; cnt++; }
+  for (let s = 0; s < 240 / r.params.dt; s++) simStep(r);
+  let later = 0;
+  for (let i = 0; i < GRID_N; i++) if (r.mask[i] === 0) later += r.biomass[i];
+  check('biomass: seeded after prewarm, then grows during play', seeded / cnt > 0.05 && later > seeded * 1.1, `mean ${(seeded / cnt).toFixed(3)} -> ${(later / cnt).toFixed(3)} after 240 sim s`);
+  // households keep their surroundings open: forest planted at a doorstep is pushed back to crop level
+  const h = createWorld(1337); prewarm(h); seedCivilization(h);
+  let d = -1;
+  for (let s = 0; s < h.civ.nS; s++) if (h.civ.sKind[s] === KIND_DWELLING && h.civ.sDecay[s] < 0.4) { d = s; break; }
+  const cell = Math.round((h.civ.sZ[d] + 10) / 20 * 128 - 0.5) * 128 + Math.round((h.civ.sX[d] + 10) / 20 * 128 - 0.5);
+  h.biomass[cell] = 1;
+  for (let s = 0; s < 10 / h.params.dt; s++) simStep(h);
+  check('biomass: forest at a healthy dwelling\'s door is cleared back to crops', d >= 0 && h.biomass[cell] < 0.45, `dwelling ${d}, 1.00 -> ${h.biomass[cell].toFixed(2)} in 10 sim s`);
+}
+
 // 5c. tools, events, raymarch
 {
   const w = createWorld(31);
@@ -223,7 +264,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   // determinism
   const a = mk(77), b = mk(77);
   for (let i = 0; i < 1500; i++) { simStep(a); simStep(b); }
-  check('civ: deterministic from the same seed', bytesEqual(a.civ.vX, b.civ.vX) && bytesEqual(a.civ.vZ, b.civ.vZ) && a.civ.food === b.civ.food && a.civ.built === b.civ.built);
+  check('civ: deterministic from the same seed', bytesEqual(a.civ.vX, b.civ.vX) && bytesEqual(a.civ.vZ, b.civ.vZ) && a.civ.food === b.civ.food && a.civ.built === b.civ.built && bytesEqual(a.biomass, b.biomass));
 
   // zero allocation with everyone walking
   const z = mk(5);

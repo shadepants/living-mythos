@@ -496,7 +496,7 @@ const CELL_SIZE = WORLD_SIZE / GRID_W;
 function createSimTextures(floatLinear) {
   const bufA = new Float32Array(GRID_N * 4);
   const bufB = new Float32Array(GRID_N * 4);
-  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows)
+  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows), B = biomass (vegetation)
   const filter = floatLinear ? THREE.LinearFilter : THREE.NearestFilter;
   const make = (buf) => {
     const t = new THREE.DataTexture(buf, GRID_W, GRID_H, THREE.RGBAFormat, THREE.FloatType);
@@ -524,7 +524,10 @@ function packSimTextures(world, st) {
 // Shade factor (0 shadowed .. 1 lit) from the CPU heightfield march, into R of uSimTexC.
 function packShadeTexture(world, st) {
   const sh = world.shade, c = st.bufC;
-  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) c[j] = sh[i];
+  // biomass rides along on the shade sweep's upload (~every 16 frames): it changes over minutes, and packing it
+  // every frame would re-upload the whole 256 KB texture each frame
+  const bm = world.biomass;
+  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) { c[j] = sh[i]; c[j + 2] = bm[i]; }
   st.texC.needsUpdate = true;
 }
 
@@ -1297,6 +1300,17 @@ const TUNING = Object.freeze({
   fertDecay: 0.05,
   fertCompactDecay: 0.08,
   compactRelax: 0.01,     // 1/s
+  // standing vegetation (biomass 0..1: grass < 0.3, crops 0.3-0.65, forest > 0.65); grows toward a ceiling set by
+  // fertility, trampling and flooding, so untouched fertile valleys turn to forest over a few real minutes
+  biomassGrow: 0.004,     // 1/s approach rate toward the ceiling (~2 real min to 0.65 of it at SIM_SPEED 2)
+  biomassDecay: 0.03,     // 1/s when the ceiling drops (trampled, drowned, soil exhausted)
+  biomassFertLo: 0.4,     // fertility where the ceiling starts rising
+  biomassFertHi: 0.85,    // fertility that supports full forest
+  biomassDrown: 0.04,     // standing water depth that drowns vegetation
+  biomassSeed: 0.55,      // boot / old-save biomass as a fraction of the ceiling (forest grows in after start)
+  forageClear: 0.04,      // biomass removed per forage visit (villagers clear woods around the settlement)
+  homeClearRadius: 1.6,   // world units around a healthy dwelling kept open as fields
+  homeClearLevel: 0.35,   // biomass at the doorstep (crop level), rising to no limit at the radius
   biasDiffuse: 0.05,
   biasDecay: 0.002,
 
@@ -2362,6 +2376,7 @@ function arrive(world, v) {
     civ.vCargo[v] = Math.min(1, civ.vCargo[v] + 0.35);
     const i = cellOf(civ.vX[v], civ.vZ[v]);
     world.fertility[i] = Math.max(0, world.fertility[i] - 0.01);
+    world.biomass[i] = Math.max(0, world.biomass[i] - TUNING.forageClear);
   } else if (st === ST_HAUL) {
     civ.food += civ.vCargo[v] * 10;
     civ.vCargo[v] = 0;
@@ -2613,6 +2628,24 @@ function markCoverFor(world, x, z, dirX, dirZ, len, radius, kind) {
 
 function secondTick(world) {
   const civ = world.civ;
+  // farmers keep the ground around healthy homes open: biomass near a dwelling is pushed back toward crop level
+  // (without this, forest grows right up to the doors, since settlements sit on the most fertile ground)
+  {
+    const bm = world.biomass, R = TUNING.homeClearRadius, LVL = TUNING.homeClearLevel;
+    const rc = Math.ceil(R / 20 * GRID_W);
+    for (let s = 0; s < civ.nS; s++) {
+      if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] > 0.4) continue;
+      const gx = Math.round((civ.sX[s] + 10) / 20 * GRID_W - 0.5), gz = Math.round((civ.sZ[s] + 10) / 20 * GRID_H - 0.5);
+      for (let dz = -rc; dz <= rc; dz++) for (let dx = -rc; dx <= rc; dx++) {
+        const x = gx + dx, z = gz + dz;
+        if (x < 0 || z < 0 || x >= GRID_W || z >= GRID_H) continue;
+        const d = Math.sqrt(dx * dx + dz * dz) * 20 / GRID_W;
+        if (d > R) continue;
+        const i = z * GRID_W + x, lim = LVL + (1 - LVL) * (d / R) * (d / R);
+        if (bm[i] > lim) bm[i] -= (bm[i] - lim) * 0.25;
+      }
+    }
+  }
   // ruins: dwellings in barren ground slump; luminescence fades unless a monolith sustains it
   for (let s = 0; s < civ.nS; s++) {
     if (civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1) continue;
@@ -3246,12 +3279,17 @@ const GLSL_FLORA_VERT_POS = /* glsl */`
   vec3 fBase = instanceMatrix[3].xyz;
   vec2 fUv = worldToUv(fBase.xz);
   vec4 fA = simA(fUv);
-  vShade = fetchBil(uSimTexC, fUv).r;
+  vec4 fC = fetchBil(uSimTexC, fUv);
+  vShade = fC.r;
   vec4 fB = simB(fUv);
   float fert = fB.g, comp = fB.b, bias = fB.a, wat = fA.g;
   float arche = aInstanceState.x, grow = aInstanceState.y;
   float part = aPart.x, yn = aPart.y;
-  float vis = (part > 0.25 && arche < 0.9) ? 0.0 : 1.0;
+  // trees: the share of tufts showing a trunk + canopy follows the live biomass (scattered ~5% on open ground,
+  // ~70% in old forest); the per-tuft hash decides which ones, and each tree grows in over a short biomass range
+  float treeFrac = mix(0.04, 0.7, smoothstep(0.6, 0.95, fC.b));   // crops (biomass < 0.6) stay open fields
+  float treeAmt = smoothstep(1.0 - treeFrac, 1.0 - treeFrac + 0.06, arche);
+  float vis = part > 0.25 ? treeAmt : 1.0;
   float hgt = mix(0.22, 1.0, smoothstep(0.08, 0.85, fert)) * grow * (1.0 - 0.8 * comp) * (0.8 + 0.5 * arche);
   hgt *= 1.0 - smoothstep(0.015, 0.04, wat);
   float wid = mix(0.6, 1.0, hgt);
@@ -3440,7 +3478,7 @@ function createFlora(caps, count) {
     m.compose(p, q, sc);
     mesh.setMatrixAt(k, m);
     const o = k * 4;
-    state.array[o] = hash2(gx, gz, 53);                  // archetype 0..1 (tree if > 0.78)
+    state.array[o] = hash2(gx, gz, 53);                  // archetype 0..1 (with biomass, decides which tufts are trees)
     state.array[o + 1] = 0.75 + 0.5 * hash2(gx, gz, 59); // growth stage
     state.array[o + 2] = 0;                              // decay
     state.array[o + 3] = 0;                              // luminescence
@@ -3910,6 +3948,7 @@ function createWorld(seed) {
     rimOut: f(),                         // water drained over the cliff by the last substep, per rim cell
     sedTmp: f(),                         // scratch for sediment advection
     ecoTmp: f(),                         // scratch for ecology diffusion
+    biomass: f(),                        // standing vegetation 0..1 (grass -> crops -> forest), saved
     shade: new Float32Array(GRID_N).fill(1),   // sun shadow factor from the heightfield (runtime only)
     soil: f(),                           // fixed soil quality 0.55..1.45 (regenerated from the seed, not saved)
     ecoCount: 0,
@@ -4077,10 +4116,25 @@ function hydroStep(world) {
 }
 
 // ---- sim/ecology.js ----
+// Ceiling for standing vegetation: fertile, untrampled, dry ground can carry forest.
+function biomassCap(fert, comp, water) {
+  let t = (fert - TUNING.biomassFertLo) / (TUNING.biomassFertHi - TUNING.biomassFertLo);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const k = 1 - comp;
+  return t * t * (3 - 2 * t) * k * k * (water > TUNING.biomassDrown ? 0 : 1);
+}
+
+// Boot / old-save seeding: start every cell part-way to its ceiling so forests visibly grow in during play.
+function seedBiomass(world) {
+  const { fertility, compaction, water, mask, biomass } = world;
+  for (let i = 0; i < biomass.length; i++) biomass[i] = mask[i] === 1 ? 0 : TUNING.biomassSeed * biomassCap(fertility[i], compaction[i], water[i]);
+}
+
 // Soil moisture, crop/humus fertility, footpath relaxation and cultural drift (spec 3.3). Allocation-free.
 function ecologyStep(world, dt) {
   const p = world.params;
-  const { elev, soil, water, moisture, fertility, compaction, culturalBias, mask, ecoTmp, frustration, engCover } = world;
+  const { elev, soil, water, moisture, fertility, compaction, culturalBias, mask, ecoTmp, frustration, engCover, biomass } = world;
+  const bGrow = TUNING.biomassGrow * p.ecoGrow * dt, bDecay = TUNING.biomassDecay * dt;
   const absorb = Math.min(1, TUNING.moistAbsorb * dt);
   const evap = TUNING.moistEvap * dt * p.evapMul;
   const rainGain = p.rain * dt * TUNING.moistFromRain;
@@ -4091,7 +4145,7 @@ function ecologyStep(world, dt) {
   const fDecay = TUNING.frustrateDecay * dt, fCover = TUNING.coverDecay * dt;
 
   for (let i = 0; i < GRID_N; i++) {
-    if (mask[i] === 1) { moisture[i] = 0; fertility[i] = 0; compaction[i] = 0; continue; }
+    if (mask[i] === 1) { moisture[i] = 0; fertility[i] = 0; compaction[i] = 0; biomass[i] = 0; continue; }
     let wet = water[i] * TUNING.moistFromWater;
     if (wet > 1) wet = 1;
     let m = moisture[i];
@@ -4108,6 +4162,11 @@ function ecologyStep(world, dt) {
     if (target > 1) target = 1;
     f += (target - f) * (target > f ? grow : decay + cdecay * c);
     fertility[i] = f > 1 ? 1 : f < 0 ? 0 : f;
+    // standing vegetation follows its ceiling slowly up (succession) and faster down (trampling, flooding)
+    const cap = biomassCap(fertility[i], c, water[i]);
+    const b = biomass[i];
+    const nb = b + (cap - b) * (cap > b ? bGrow : bDecay);
+    biomass[i] = nb > 1 ? 1 : nb < 0 ? 0 : nb;
     const cr = engCover[i] === 4 ? relax * 25 : relax;
     compaction[i] = c > cr ? c - cr : 0;
     const fr = frustration[i];
@@ -4161,14 +4220,16 @@ function prewarm(world, ticks, substepsPerTick) {
   const t = ticks === undefined ? TUNING.prewarmTicks : ticks;
   const s = substepsPerTick === undefined ? TUNING.prewarmSubsteps : substepsPerTick;
   for (let i = 0; i < t; i++) for (let k = 0; k < s; k++) simStep(world);
+  seedBiomass(world);   // the 25 s pre-warm is far too short to grow vegetation; seed it from the settled fertility
 }
 
 // ---- sim/persist.js ----
 // Save / restore of the living world (spec 1.6). Typed arrays travel as base64; everything else as small JSON.
 const SAVE_KEY = 'mythos.save.v1';
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;   // 2: + biomass. v1 saves still load (biomass is re-seeded from fertility)
 
-const WORLD_F32 = ['elev', 'water', 'sediment', 'moisture', 'fertility', 'compaction', 'frustration', 'culturalBias', 'monoliths', 'monoPulse'];
+const WORLD_F32 = ['elev', 'water', 'sediment', 'moisture', 'fertility', 'compaction', 'frustration', 'culturalBias', 'monoliths', 'monoPulse', 'biomass'];
+const ADDED_IN = { biomass: 2 };   // fields missing from older save versions
 const WORLD_U8 = ['engCover'];
 const CIV_F32 = ['vX', 'vZ', 'vVX', 'vVZ', 'vTX', 'vTZ', 'vCargo', 'vEnergy', 'vPhase', 'vTimer', 'vHeading',
   'sX', 'sZ', 'sRot', 'sBias', 'sBuild', 'sDecay', 'sLum', 'sDirX', 'sDirZ', 'sLen', 'mX', 'mZ', 'mT0', 'mSeed', 'monoX', 'monoZ'];
@@ -4206,11 +4267,15 @@ function serializeWorld(world, extra) {
 function restoreWorld(world, text) {
   let data;
   try { data = JSON.parse(text); } catch (e) { return { ok: false }; }
-  if (!data || data.v !== SAVE_VERSION || data.seed !== world.seed || !data.w || !data.c || !data.n) return { ok: false };
+  if (!data || !(data.v >= 1 && data.v <= SAVE_VERSION) || data.seed !== world.seed || !data.w || !data.c || !data.n) return { ok: false };
+  const skipped = [];
   const civ = world.civ;
   const staged = [];
   try {
-    for (const k of WORLD_F32) { const a = fromB64(data.w[k], Float32Array, world[k].length); if (!a) return { ok: false }; staged.push([world[k], a]); }
+    for (const k of WORLD_F32) {
+      if ((ADDED_IN[k] || 1) > data.v) { skipped.push(k); continue; }   // older save: field did not exist yet
+      const a = fromB64(data.w[k], Float32Array, world[k].length); if (!a) return { ok: false }; staged.push([world[k], a]);
+    }
     for (const k of WORLD_U8) { const a = fromB64(data.w[k], Uint8Array, world[k].length); if (!a) return { ok: false }; staged.push([world[k], a]); }
     for (const k of CIV_F32) { const a = fromB64(data.c[k], Float32Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]); }
     for (const k of CIV_U8) { const a = fromB64(data.c[k], Uint8Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]); }
@@ -4220,9 +4285,10 @@ function restoreWorld(world, text) {
   // sanity: elevations and fertility must be finite and in range before we trust the data
   for (const [target, src] of staged) {
     if (target === world.elev) { for (let i = 0; i < GRID_N; i++) if (!Number.isFinite(src[i]) || src[i] > 10 || src[i] < -10) return { ok: false }; }
-    if (target === world.fertility) { for (let i = 0; i < GRID_N; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
+    if (target === world.fertility || target === world.biomass) { for (let i = 0; i < GRID_N; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
   }
   for (const [target, src] of staged) target.set(src);
+  if (skipped.includes('biomass')) seedBiomass(world);
   for (const k of CIV_NUM) civ[k] = data.n[k];
   world.stats.time = data.time || 0;
   // runtime-only state that is not saved: orders restart, builders go home, unfinished works are considered done
@@ -4677,6 +4743,15 @@ function boot() {
       mods: { createAudioEngine, SCALES, degreeFreq, semiFreq, TIMBRE },
       world, ctl, atmo, camera, controls, flora, particles, structures, villagers, audio, director, photo, gov, save, takePhoto, restored,
       snapshot() { renderFrame(); return canvas.toDataURL('image/png'); },
+      // fast-forward the real simulation (for frames "a few minutes later" in software-GL tests)
+      advance(simSeconds) {
+        const n = Math.round(simSeconds / world.params.dt);
+        for (let k = 0; k < n; k++) simStep(world);
+        packSimTextures(world, simTex);
+        while (!stepShade(world, shadeState, SHARED.uSunDir.value, 128)) { /* finish a full shade sweep */ }
+        packShadeTexture(world, simTex);
+        return world.stats.time;
+      },
       project(x, y, z) {
         pv.set(x, y, z).project(camera);
         const r = canvas.getBoundingClientRect();

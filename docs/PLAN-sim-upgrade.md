@@ -56,19 +56,23 @@ first minute, then ~1-2 per minute up to ~13-16 by 12 min. Tests: two timing win
 20 -> 60 sim s; path-wear commute 80 -> 110 sim s, margin 0.15 -> 0.10 since fewer Masons work near the test path).
 Still to do: judge on the phone; nudge the numbers if it now feels too slow.
 
-## Phase 1 — Living vegetation (Gemini Phase 3, first half)
+## Phase 1 — Living vegetation (DONE 2026-10-21)
 
-Most visible payoff, lowest risk; pure ecology plus shaders.
-- New `biomass` grid field (0..1): grows toward a fertility- and moisture-driven ceiling; forage, compaction and
-  flooding knock it back. Bands: grass < 0.3, crops 0.3-0.65, trees > 0.65.
-- Pack it into `uSimTexC.b` (free channel); the flora shader shows trees where biomass is high instead of the
-  boot-time hash (keep the hash as per-tuft jitter so the forest edge isn't a hard line).
-- **[review]** `uSimTexC` is only uploaded when a shade sweep completes (~every 16 frames, `main.js:316`). Fine for
-  slow growth; for instant changes (a villager clears a tree, a brush stroke) also write biomass in
-  `packSimTextures` and flag `texC` for upload on frames that pack.
-- Foragers prefer and reduce biomass; this is the hook for Phase 2's timber.
-- Timing target: an untouched fertile valley turns into forest over a few real minutes at the Phase 0 speed.
-- Tests: growth/clearing rates, determinism, zero-GC, save migration; snap frames before/after.
+- `world.biomass` (0..1, saved): each ecology tick it moves toward a ceiling = smoothstep(fertility 0.4..0.85)
+  x (1 - compaction)^2, zero under standing water > 0.04. Up slowly (`biomassGrow` 0.004/s), down faster (0.03/s).
+  Foragers remove 0.04 per visit; healthy dwellings keep a 1.6 u radius open at crop level (`homeClearRadius/Level`),
+  since settlements sit on the most fertile ground and forest otherwise grew right up to the doors.
+- Seeded at 55% of its ceiling after prewarm and when loading a v1 save (`SAVE_VERSION` 2, `ADDED_IN` map in
+  persist.js; v1 saves still load).
+- GPU: packed into `uSimTexC.b` on the shade-sweep upload (~every 16 frames; per-frame packing would re-upload
+  256 KB each frame for a field that changes over minutes). The flora shader shows trees on
+  mix(4%, 70%) of tufts as biomass goes 0.6 -> 0.95 (crops stay open fields); the boot-time hash only picks which.
+- Measured (Node, seeds 1337 / 7, real minutes at SIM_SPEED 2): forest (biomass > 0.65) 0% at boot, ~1% at 2 min,
+  6-12% at 4 min, 5-13% at 8 min; crops 20-36%; forest within 1.4 u of homes 5-10% (was 43-61% before the
+  clearing rule). First tuning (fertility 0.3..0.75, no clearing) gave 27-47% forest and buried the villages.
+- Tests: growth / trampling / drowning / range / seeding / home clearing (fails with clearing off) / determinism /
+  v1 migration / round-trip / corrupt biomass rejected. Frames: `docs/screens/succession-boot.png`,
+  `succession-4min.png` (via the new debug hook `__mythos.advance(simSeconds)`).
 
 ## Phase 2 — Building materials (Gemini Phase 3, second half), trimmed
 

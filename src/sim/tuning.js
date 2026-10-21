@@ -36,6 +36,17 @@ export const TUNING = Object.freeze({
   fertDecay: 0.05,
   fertCompactDecay: 0.08,
   compactRelax: 0.01,     // 1/s
+  // standing vegetation (biomass 0..1: grass < 0.3, crops 0.3-0.65, forest > 0.65); grows toward a ceiling set by
+  // fertility, trampling and flooding, so untouched fertile valleys turn to forest over a few real minutes
+  biomassGrow: 0.004,     // 1/s approach rate toward the ceiling (~2 real min to 0.65 of it at SIM_SPEED 2)
+  biomassDecay: 0.03,     // 1/s when the ceiling drops (trampled, drowned, soil exhausted)
+  biomassFertLo: 0.4,     // fertility where the ceiling starts rising
+  biomassFertHi: 0.85,    // fertility that supports full forest
+  biomassDrown: 0.04,     // standing water depth that drowns vegetation
+  biomassSeed: 0.55,      // boot / old-save biomass as a fraction of the ceiling (forest grows in after start)
+  forageClear: 0.04,      // biomass removed per forage visit (villagers clear woods around the settlement)
+  homeClearRadius: 1.6,   // world units around a healthy dwelling kept open as fields
+  homeClearLevel: 0.35,   // biomass at the doorstep (crop level), rising to no limit at the radius
   biasDiffuse: 0.05,
   biasDecay: 0.002,
 

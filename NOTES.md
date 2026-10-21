@@ -125,3 +125,10 @@ stays 2.0 and only civ pacing changed: food per dwelling 55 -> 360, dwelling ris
 6 -> 20 s, at most 2 open orders with 45 sim s between them, frustration 0.7 -> 0.35/s, walk 0.55 -> 0.42 u/s.
 Before: the town hit the 40-dwelling cap and ~12 works within the first real minute. After: cap at ~6-10 minutes,
 works trickle in at ~1-2 per minute. Details and the measurement script approach are in `docs/PLAN-sim-upgrade.md`.
+
+## Living vegetation (Phase 1, 2026-10-21)
+`world.biomass` drives tree density: forests grow in fertile, untrampled, dry ground over a few real minutes; flooding,
+trampling and foraging clear them; homes keep their fields open. Packed into `uSimTexC.b`. Save version 2 (v1 saves
+migrate). Debug hook `window.__mythos.advance(simSeconds)` fast-forwards the real sim for "minutes later" frames on
+llvmpipe. Details and measurements in `docs/PLAN-sim-upgrade.md` Phase 1.
+

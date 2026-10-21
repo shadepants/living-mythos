@@ -23,12 +23,17 @@ export const GLSL_FLORA_VERT_POS = /* glsl */`
   vec3 fBase = instanceMatrix[3].xyz;
   vec2 fUv = worldToUv(fBase.xz);
   vec4 fA = simA(fUv);
-  vShade = fetchBil(uSimTexC, fUv).r;
+  vec4 fC = fetchBil(uSimTexC, fUv);
+  vShade = fC.r;
   vec4 fB = simB(fUv);
   float fert = fB.g, comp = fB.b, bias = fB.a, wat = fA.g;
   float arche = aInstanceState.x, grow = aInstanceState.y;
   float part = aPart.x, yn = aPart.y;
-  float vis = (part > 0.25 && arche < 0.9) ? 0.0 : 1.0;
+  // trees: the share of tufts showing a trunk + canopy follows the live biomass (scattered ~5% on open ground,
+  // ~70% in old forest); the per-tuft hash decides which ones, and each tree grows in over a short biomass range
+  float treeFrac = mix(0.04, 0.7, smoothstep(0.6, 0.95, fC.b));   // crops (biomass < 0.6) stay open fields
+  float treeAmt = smoothstep(1.0 - treeFrac, 1.0 - treeFrac + 0.06, arche);
+  float vis = part > 0.25 ? treeAmt : 1.0;
   float hgt = mix(0.22, 1.0, smoothstep(0.08, 0.85, fert)) * grow * (1.0 - 0.8 * comp) * (0.8 + 0.5 * arche);
   hgt *= 1.0 - smoothstep(0.015, 0.04, wat);
   float wid = mix(0.6, 1.0, hgt);
