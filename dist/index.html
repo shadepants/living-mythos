@@ -1312,18 +1312,21 @@ const TUNING = Object.freeze({
   structureCap: 600,
   dwellingCap: 40,
   startDwellings: 14,
-  walkSpeed: 0.55,         // world units/s
+  walkSpeed: 0.42,         // world units/s (was 0.55; slowed 2026-10-21, Jordan: villagers a little too fast)
   slopePenalty: 10,        // speed divisor: 1 + slope * this
-  frustrateRate: 0.7,      // frustration/s added per villager standing on a steep or wet uncovered cell
+  frustrateRate: 0.35,     // frustration/s added per villager standing on a steep or wet uncovered cell
   frustrateDecay: 0.01,    // 1/s everywhere
   coverDecay: 0.2,         // 1/s on cells under a bridge / steps / paving
   orderThreshold: 0.45,    // frustration that summons a Mason
-  buildTime: 6.0,          // s
+  buildTime: 20.0,         // sim s per Mason work (was 6; pacing pass 2026-10-21)
+  maxOpenOrders: 2,        // Mason orders open at once (was 4)
+  orderGap: 45,            // sim s between new Mason orders, so works trickle in instead of a burst at boot
+  dwellingRise: 0.04,      // build progress/s of a new dwelling (~25 sim s; was 0.08)
   maxMasons: 14,
   maxWorks: 40,            // total bridges / stairs / paving the community will ever build
   ruinFertility: 0.22,
   ruinRate: 0.045,         // decay/s when local fertility is below ruinFertility
-  foodPerDwelling: 55,
+  foodPerDwelling: 360,    // was 55: the town filled to the 40-dwelling cap within one real minute
 
   // island shape
   rimRadius: 0.92,
@@ -2144,7 +2147,7 @@ function createCiv() {
     monoStruct: new Int32Array(8).fill(-1), monoX: new Float32Array(8), monoZ: new Float32Array(8),
     nM: 0, mX: f(MYTH_MAX), mZ: f(MYTH_MAX), mT0: f(MYTH_MAX), mSeed: f(MYTH_MAX),
     mKind: new Uint8Array(MYTH_MAX), mStruct: new Int32Array(MYTH_MAX).fill(-1), mAnniv: new Int32Array(MYTH_MAX), mMotif: new Uint8Array(MYTH_MAX * 4), mythFlags: 0, mythClock: 0,
-    orderClock: 0, foundClock: 0, secClock: 0, lanternClock: 0, eventCursor: { i: 0 },
+    orderClock: 0, lastOrderT: -1e9, foundClock: 0, secClock: 0, lanternClock: 0, eventCursor: { i: 0 },
   };
 }
 
@@ -2460,6 +2463,7 @@ function moveVillager(world, v, dt) {
 
 function startOrder(world, i, kind, x, z, dirX, dirZ, len) {
   const civ = world.civ;
+  civ.lastOrderT = world.stats.time;
   civ.oKind[i] = kind; civ.oState[i] = 1; civ.oX[i] = x; civ.oZ[i] = z; civ.oDirX[i] = dirX; civ.oDirZ[i] = dirZ; civ.oLen[i] = len;
   civ.oProg[i] = 0; civ.oWorker[i] = -1; civ.oStruct[i] = -1; civ.oDust[i] = 0;
 }
@@ -2468,7 +2472,7 @@ function scanForOrders(world) {
   const civ = world.civ, rng = world.rng;
   let free = -1, open = 0;
   for (let o = 0; o < MAX_ORDERS; o++) { if (civ.oState[o] === 0) { if (free < 0) free = o; } else open++; }
-  if (free < 0 || open >= 4 || civ.built >= TUNING.maxWorks) return;
+  if (free < 0 || open >= TUNING.maxOpenOrders || civ.built >= TUNING.maxWorks || world.stats.time - civ.lastOrderT < TUNING.orderGap) return;
   let bestI = -1, bestF = TUNING.orderThreshold;
   for (let k = 0; k < 140; k++) {
     const i = (rng.next() * (GRID_W * GRID_H)) | 0;
@@ -2679,7 +2683,7 @@ function secondTick(world) {
   }
   // dwellings under construction by the community rise on their own
   for (let s = 0; s < civ.nS; s++) {
-    if (civ.sKind[s] === KIND_DWELLING && civ.sBuild[s] > 0 && civ.sBuild[s] < 1) civ.sBuild[s] = Math.min(1, civ.sBuild[s] + 0.08);
+    if (civ.sKind[s] === KIND_DWELLING && civ.sBuild[s] > 0 && civ.sBuild[s] < 1) civ.sBuild[s] = Math.min(1, civ.sBuild[s] + TUNING.dwellingRise);
   }
 }
 

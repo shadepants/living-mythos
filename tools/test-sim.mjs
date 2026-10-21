@@ -252,7 +252,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
     wb.frustration[river] = 0.9;
     const tb0 = wb.stats.time;
     let tOrder = -1, tDone = -1;
-    for (let i = 0; i < 20 * 40 && tDone < 0; i++) {
+    for (let i = 0; i < 60 * 40 && tDone < 0; i++) {   // 60 sim s: walk over + TUNING.buildTime (20 s)
       wb.frustration[river] = Math.max(wb.frustration[river], 0.9 * (wb.civ.built === 0 ? 1 : 0));
       simStep(wb);
       if (tOrder < 0) for (let o = 0; o < 12; o++) if (wb.civ.oState[o] > 0) tOrder = wb.stats.time;

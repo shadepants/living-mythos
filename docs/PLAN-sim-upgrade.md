@@ -35,32 +35,26 @@ silently (`persist.js:75`). The current save is ~747 KB; each new Float32 grid f
 4. Keep the audit contract (5 InstancedMesh, pool caps) and update SPEC.md when behaviour changes.
 5. Each phase ends with `npm run verify`, preview-map / snap frames, and a phone run (Desktop site **off**).
 
-## Phase 0 — Slow the simulation down (Jordan, first)
+## Phase 0 — Slower pace of change (DONE 2026-10-21)
 
-Now: `SIM_SPEED = 2.0` sim seconds per real second (`main.js:292`) for everything: water, walking, growth,
-building, myth clocks. Phone soak: 240 s real = 503 s sim.
+Jordan's call: the **pace of change** is too fast (buildings go up too fast, villagers walk a little too fast);
+water and weather speed are fine. So the global `SIM_SPEED` stays at 2.0, which also sidesteps the
+frames-with-no-sim-step problem the review found (it remains for screens above ~80 fps; villager interpolation
+stays on the list if judder shows up on the phone).
 
-- Make speed a tunable: `TUNING.simSpeed` plus a `?speed=` URL switch for trying values on the phone.
-- Default to **1.0** (half the current speed) as a first cut, then judge on the phone.
-- Then split "motion" from "pacing" if needed: water and walking may look right at 1.0 while growth / building / myths
-  still feel rushed. Those are separate constants (`buildTime` 6 s, `ANNIVERSARY` 120 s, ecology rates, order
-  clocks) and can be stretched without making water crawl.
-- Check: time-based checks in `test-interact` (e.g. Monsoon rainfall after 5.5 s, pool >= 8 structures) may need
-  longer waits; sim tests call `simStep` directly and are unaffected. Fewer substeps per frame also lowers CPU cost.
-- **[review] Frames with no sim step.** The sim runs fixed 0.025 s steps; at speed 1.0 and 60 fps the pattern is
-  0, 1, 1 steps per frame, so a third of frames advance nothing (`main.js:312-315`). Two consequences:
-  - Brush strokes (`sculptAt` / `rainAt` run in `ctl.update`, every frame) only reach the GPU on frames with a step,
-    because `packSimTextures` is gated on `n > 0`. Fix: a `world.dirty` flag set by the tools; pack when
-    `n > 0 || world.dirty`.
-  - Villagers are drawn straight from sim positions (`villagers.js:56`), so they would move in 40 Hz steps on a 60 Hz
-    screen. Fix: keep the previous position per villager and interpolate by `simAcc / dt` when filling the instance
-    buffer (render-side only; sim stays deterministic). The phone already runs at 60-82 fps, so this judder exists
-    above ~80 fps even at today's 2.0.
-- **[review] SPEC feel targets.** SPEC.md asks for visible crop/soil succession within ~25 s of play (line 212) and
-  Mason dispatch within ~10 s of traffic (line 324), both tuned at 2.0. Slowing down is the point, so Phase 0
-  rewrites these targets in SPEC to whatever Jordan settles on, rather than speeding those rates back up.
-- **Decide with Jordan on the phone:** which feels too fast — the motion, the pace of change, or both.
-  Later phases set their own timing targets in sim seconds against the speed chosen here.
+Measured before (Node, 3 seeds, real minutes at 2.0): dwellings went 14 -> 35-40 (the cap) **in the first minute**
+and 10-13 Mason works were built in that minute; then almost nothing changed for 9 minutes.
+
+Changes (all in `TUNING` / `civ.js`):
+- `foodPerDwelling` 55 -> 360, `dwellingRise` 0.08 -> 0.04 per sim s (a dwelling takes ~25 sim s to go up)
+- `buildTime` 6 -> 20 sim s, `maxOpenOrders` 4 -> 2, new `orderGap` 45 sim s between Mason orders,
+  `frustrateRate` 0.7 -> 0.35
+- `walkSpeed` 0.55 -> 0.42
+
+Result (same measurement): dwellings 14 -> ~17-19 at 1 min, ~28-34 at 4 min, cap at ~6-10 min; works ~2-3 in the
+first minute, then ~1-2 per minute up to ~13-16 by 12 min. Tests: two timing windows widened (Mason build window
+20 -> 60 sim s; path-wear commute 80 -> 110 sim s, margin 0.15 -> 0.10 since fewer Masons work near the test path).
+Still to do: judge on the phone; nudge the numbers if it now feels too slow.
 
 ## Phase 1 — Living vegetation (Gemini Phase 3, first half)
 

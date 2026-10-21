@@ -322,6 +322,9 @@ touch gestures. *Check:* tools work on mouse and touch; no `Raycaster` use.
 **M6 — Villagers & structures.** SoA AI, pathing, structure archetypes,
 ruins/re-consecration, Mason projects, particles pool. *Check:* Mason dispatch
 within ~10 s of traffic; zero-GC test passes with entities running.
+*Pacing (2026-10-21, Jordan: building too fast):* the first Mason order still comes within seconds, later
+orders are spaced by `TUNING.orderGap` (45 sim s) with at most `maxOpenOrders` (2) open; the town grows from 14
+to the 40-dwelling cap over ~6-10 real minutes instead of ~1; villagers walk at 0.42 u/s.
 
 **M7 — Monoliths, breeze, myths.** Remaining tools, sky-lanterns, myth events
 and glyph rendering. *Check:* revive a ruin with a monolith; a myth glyph

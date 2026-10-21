@@ -51,18 +51,21 @@ export const TUNING = Object.freeze({
   structureCap: 600,
   dwellingCap: 40,
   startDwellings: 14,
-  walkSpeed: 0.55,         // world units/s
+  walkSpeed: 0.42,         // world units/s (was 0.55; slowed 2026-10-21, Jordan: villagers a little too fast)
   slopePenalty: 10,        // speed divisor: 1 + slope * this
-  frustrateRate: 0.7,      // frustration/s added per villager standing on a steep or wet uncovered cell
+  frustrateRate: 0.35,     // frustration/s added per villager standing on a steep or wet uncovered cell
   frustrateDecay: 0.01,    // 1/s everywhere
   coverDecay: 0.2,         // 1/s on cells under a bridge / steps / paving
   orderThreshold: 0.45,    // frustration that summons a Mason
-  buildTime: 6.0,          // s
+  buildTime: 20.0,         // sim s per Mason work (was 6; pacing pass 2026-10-21)
+  maxOpenOrders: 2,        // Mason orders open at once (was 4)
+  orderGap: 45,            // sim s between new Mason orders, so works trickle in instead of a burst at boot
+  dwellingRise: 0.04,      // build progress/s of a new dwelling (~25 sim s; was 0.08)
   maxMasons: 14,
   maxWorks: 40,            // total bridges / stairs / paving the community will ever build
   ruinFertility: 0.22,
   ruinRate: 0.045,         // decay/s when local fertility is below ruinFertility
-  foodPerDwelling: 55,
+  foodPerDwelling: 360,    // was 55: the town filled to the 40-dwelling cap within one real minute
 
   // island shape
   rimRadius: 0.92,

@@ -38,7 +38,7 @@ export function createCiv() {
     monoStruct: new Int32Array(8).fill(-1), monoX: new Float32Array(8), monoZ: new Float32Array(8),
     nM: 0, mX: f(MYTH_MAX), mZ: f(MYTH_MAX), mT0: f(MYTH_MAX), mSeed: f(MYTH_MAX),
     mKind: new Uint8Array(MYTH_MAX), mStruct: new Int32Array(MYTH_MAX).fill(-1), mAnniv: new Int32Array(MYTH_MAX), mMotif: new Uint8Array(MYTH_MAX * 4), mythFlags: 0, mythClock: 0,
-    orderClock: 0, foundClock: 0, secClock: 0, lanternClock: 0, eventCursor: { i: 0 },
+    orderClock: 0, lastOrderT: -1e9, foundClock: 0, secClock: 0, lanternClock: 0, eventCursor: { i: 0 },
   };
 }
 
@@ -354,6 +354,7 @@ function moveVillager(world, v, dt) {
 
 function startOrder(world, i, kind, x, z, dirX, dirZ, len) {
   const civ = world.civ;
+  civ.lastOrderT = world.stats.time;
   civ.oKind[i] = kind; civ.oState[i] = 1; civ.oX[i] = x; civ.oZ[i] = z; civ.oDirX[i] = dirX; civ.oDirZ[i] = dirZ; civ.oLen[i] = len;
   civ.oProg[i] = 0; civ.oWorker[i] = -1; civ.oStruct[i] = -1; civ.oDust[i] = 0;
 }
@@ -362,7 +363,7 @@ function scanForOrders(world) {
   const civ = world.civ, rng = world.rng;
   let free = -1, open = 0;
   for (let o = 0; o < MAX_ORDERS; o++) { if (civ.oState[o] === 0) { if (free < 0) free = o; } else open++; }
-  if (free < 0 || open >= 4 || civ.built >= TUNING.maxWorks) return;
+  if (free < 0 || open >= TUNING.maxOpenOrders || civ.built >= TUNING.maxWorks || world.stats.time - civ.lastOrderT < TUNING.orderGap) return;
   let bestI = -1, bestF = TUNING.orderThreshold;
   for (let k = 0; k < 140; k++) {
     const i = (rng.next() * (GRID_W * GRID_H)) | 0;
@@ -573,7 +574,7 @@ function secondTick(world) {
   }
   // dwellings under construction by the community rise on their own
   for (let s = 0; s < civ.nS; s++) {
-    if (civ.sKind[s] === KIND_DWELLING && civ.sBuild[s] > 0 && civ.sBuild[s] < 1) civ.sBuild[s] = Math.min(1, civ.sBuild[s] + 0.08);
+    if (civ.sKind[s] === KIND_DWELLING && civ.sBuild[s] > 0 && civ.sBuild[s] < 1) civ.sBuild[s] = Math.min(1, civ.sBuild[s] + TUNING.dwellingRise);
   }
 }
 

@@ -118,3 +118,10 @@ Source bundle uploaded as one text file (Gemini's GitHub "Import code" read the 
 - **Open, low:** the 8-notes-per-frame cap (SPEC) can drop a myth leitmotif in a big burst of events; the structure state/kind attributes are re-uploaded every frame (~19 KB).
 - `test-interact`'s touch-drag check now uses `ctl.st.sculptClock` instead of elevation (a fresh pit silts up on its own and made it flaky).
 - Phone re-check of the fixed build (2026-10-21): 186 s, fps 60-82, worst frame 33 ms, sim 1.3-2.2 ms, 12 programs, 0 errors, no context loss, heap 13 MB. Chrome was in "Desktop site" mode (980 px layout on a 444 px screen), which shrinks `MOVE_PX` to ~4.5 real px so every tap read as a drag (0 taps / 118 touches) — the monolith and off-island fixes were covered by `test-interact` only. If taps misbehave again, scale `MOVE_PX` by `innerWidth / screen.width`.
+
+## Pacing pass (2026-10-21)
+Jordan: buildings went up too fast and villagers walked a little too fast (water/weather speed fine), so `SIM_SPEED`
+stays 2.0 and only civ pacing changed: food per dwelling 55 -> 360, dwelling rise 0.08 -> 0.04/s, Mason build
+6 -> 20 s, at most 2 open orders with 45 sim s between them, frustration 0.7 -> 0.35/s, walk 0.55 -> 0.42 u/s.
+Before: the town hit the 40-dwelling cap and ~12 works within the first real minute. After: cap at ~6-10 minutes,
+works trickle in at ~1-2 per minute. Details and the measurement script approach are in `docs/PLAN-sim-upgrade.md`.
