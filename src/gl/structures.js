@@ -26,34 +26,34 @@ export function createStructureGeometry() {
   }
   kitBox(b, 0, 0.08, 0.2, 0.11, 0.15, 0.03, 27, yn);
 
-  // --- Pastoral cottage with a windmill (pid 1 wall, 2 thatch, 5 blades, 13 post)
-  kitBox(b, 0, 0.21, 0, 0.44, 0.26, 0.36, 1, yn);
+  // --- Wattle hut, home stage 1 (pid 28 woven wall, 29 thatch cone, 34 door)
+  kitFrustum(b, 0, 0.0, 0, 0.27, 0.25, 0.2, 9, 28, yn);
+  kitPyramid(b, 0, 0.18, 0, 0.34, 0.28, 9, 29, yn, 0.2);
+  kitBox(b, 0, 0.08, 0.255, 0.1, 0.15, 0.03, 34, yn);
+
+  // --- Timber cottage, home stage 2 (pid 30 plank walls, 31 dark frame, 2 thatch roof, 35 door)
+  kitBox(b, 0, 0.21, 0, 0.44, 0.26, 0.36, 30, yn);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) kitBox(b, sx * 0.22, 0.21, sz * 0.18, 0.04, 0.27, 0.04, 31, yn);
+  kitBox(b, 0, 0.33, 0.185, 0.46, 0.035, 0.02, 31, yn);
   kitRoof(b, 0, 0.34, 0, 0.58, 0.2, 0.46, 2, yn);
-  kitBox(b, 0.12, 0.47, -0.08, 0.06, 0.12, 0.06, 1, yn);
+  kitBox(b, 0, 0.16, 0.185, 0.1, 0.16, 0.02, 35, yn);
+
+  // --- Stone house, home stage 3 (pid 32 dressed stone, 33 slate roof, 36 door)
+  kitBox(b, 0, 0.25, 0, 0.5, 0.34, 0.42, 32, yn);
+  kitBox(b, 0, 0.43, 0, 0.53, 0.03, 0.45, 32, yn);
+  kitRoof(b, 0, 0.44, 0, 0.6, 0.22, 0.5, 33, yn);
+  kitBox(b, 0, 0.17, 0.215, 0.11, 0.18, 0.02, 36, yn);
+
+  // --- Culture accents on stages 2-3: Pastoral windmill (pid 5 blades, 13 post), Industrious forge chimney (pid 4),
+  //     Mystical crystal (pid 3)
   kitBox(b, 0.38, 0.22, 0.0, 0.05, 0.28, 0.05, 13, yn);
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * Math.PI * 2;
     kitBox(b, 0.38 + Math.cos(a) * 0.15, 0.40 + Math.sin(a) * 0.15, 0.06, Math.abs(Math.cos(a)) > 0.5 ? 0.3 : 0.05, Math.abs(Math.sin(a)) > 0.5 ? 0.3 : 0.05, 0.012, 5, yn);
   }
-
-  // --- Industrious quarry house (pid 11 basalt blocks, 4 forge chimney, 14 aqueduct arch)
-  kitBox(b, 0, 0.15, 0, 0.5, 0.14, 0.5, 11, yn);
-  kitBox(b, 0, 0.29, 0, 0.38, 0.14, 0.38, 11, yn);
-  kitBox(b, 0, 0.42, 0, 0.24, 0.12, 0.24, 11, yn);
   kitBox(b, 0.14, 0.62, 0.1, 0.07, 0.3, 0.07, 4, yn);
-  kitBox(b, -0.34, 0.2, 0.3, 0.06, 0.24, 0.06, 14, yn);
-  kitBox(b, 0.34, 0.2, 0.3, 0.06, 0.24, 0.06, 14, yn);
-  kitBox(b, 0, 0.34, 0.3, 0.74, 0.06, 0.07, 14, yn);
-
-  // --- Mystical crystal shrine (pid 3 spire, 10 lantern pylons, 15 gilded ring)
-  kitPyramid(b, 0, 0.08, 0, 0.13, 0.9, 4, 3, yn, 0.4);
-  kitPyramid(b, 0.17, 0.08, 0.08, 0.07, 0.45, 4, 3, yn, 0.9);
-  kitPyramid(b, -0.15, 0.08, -0.1, 0.06, 0.38, 4, 3, yn, 0.1);
-  for (const sx of [-1, 1]) {
-    kitBox(b, sx * 0.3, 0.2, 0.28, 0.05, 0.24, 0.05, 10, yn);
-    kitBox(b, sx * 0.3, 0.36, 0.28, 0.08, 0.07, 0.08, 10, yn);
-  }
-  kitFrustum(b, 0, 0.08, 0, 0.3, 0.28, 0.04, 10, 15, yn);
+  kitPyramid(b, -0.34, 0.04, 0.2, 0.07, 0.5, 4, 3, yn, 0.4);
+  kitPyramid(b, -0.24, 0.04, 0.27, 0.04, 0.26, 4, 3, yn, 0.9);
 
   // --- Harmonic monolith (pid 19 plinth, 8 basalt body, 18 gold bands, 17 gold cap)
   kitFrustum(b, 0, 0.0, 0, 0.22, 0.2, 0.1, 8, 19, yn);

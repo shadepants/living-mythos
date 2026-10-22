@@ -7,7 +7,7 @@ import {
 } from './events.js';
 import {
   createSocietyArrays, bindCivHelpers, seedFamily, markTownAlive, societyTick, settleArrive, killVillager,
-  ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, SOCIETY, MAX_CAMPS, householdOf,
+  ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, SOCIETY, MAX_CAMPS, householdOf, restage,
 } from './society.js';
 import {
   bindKnowHelpers, useIdea, noteForage, noteFlood, knows, IDEA_FIRE, IDEA_SHELTER, IDEA_BASKETS, IDEA_FARMING, IDEA_WOOD, IDEA_STONE,
@@ -522,6 +522,7 @@ export function recordMyth(world, kind, x, z) {
 export function reviveStructure(world, s) {
   const civ = world.civ;
   civ.sDecay[s] = 0; civ.sLum[s] = 1; civ.revived++;
+  if (civ.sKind[s] === KIND_DWELLING) restage(civ, s);
   emitEvent(world.events, EV_REVIVE, civ.sX[s], civ.sZ[s], 1);
   if ((civ.mythFlags & 2) === 0) { civ.mythFlags |= 2; recordMyth(world, MYTH_REVIVE, civ.sX[s], civ.sZ[s]); }
 }

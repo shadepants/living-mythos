@@ -1,13 +1,13 @@
-// Phase 5a-5c acceptance tests: one family grows, splits into camps and can die out; camps discover ideas, pass them on
+// Phase 5a-5d acceptance tests: one family grows, splits into camps and can die out; camps discover ideas, pass them on
 // and forget them; what a camp can do depends on what it knows (docs/SPEC-phase5-society.md 8). Slow (~30 min in
 // PRoot; run it in tmux). Run: node --expose-gc tools/test-society.mjs
 import { createWorld } from '../src/sim/world.js';
 import { simStep } from '../src/sim/sim.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { seedCivilization, civStep, ROLE_MASON, ROLE_MYSTIC } from '../src/sim/civ.js';
-import { killVillager, MAX_CAMPS, campCap, householdOf } from '../src/sim/society.js';
+import { killVillager, MAX_CAMPS, campCap, householdOf, campStage, SOCIETY } from '../src/sim/society.js';
 import {
-  N_IDEAS, IDEA_NAMES, IDEA_FARMING, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL, IDEA_SHELTER, IDEA_STORAGE, knows,
+  N_IDEAS, IDEA_NAMES, IDEA_FARMING, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL, IDEA_SHELTER, IDEA_STORAGE, IDEA_WOOD, IDEA_STONE, knows,
 } from '../src/sim/knowhow.js';
 import { GRID_W } from '../src/sim/grid.js';
 
@@ -37,12 +37,18 @@ const camps = (c) => { let n = 0; for (let k = 0; k < MAX_CAMPS; k++) n += c.cAc
 for (const seed of [1337, 7, 4242]) {
   const w = mk(seed), c = w.civ;
   let at3600 = -1, splits3600 = -1, range = true, homes = true, homesAt = -1;
+  // cHomes is recounted at 1 Hz, so two homes ruined in one tick can leave a camp short until the next rebuild or
+  // revival; only a shortfall lasting 5 s or more counts
+  const shortSince = new Float64Array(MAX_CAMPS).fill(-1);
   while (w.stats.time < 7200) {
     simStep(w);
     if (at3600 < 0 && w.stats.time >= 3600) { at3600 = c.nAlive; splits3600 = c.splits; }
     if ((c.nAlive < 1 && c.emptyT === 0) || c.nAlive > 120) range = false;
     for (let k = 0; k < MAX_CAMPS && homes; k++) {
-      if (c.cActive[k] && c.cHomeSlot[k] >= 0 && c.cHomes[k] < Math.ceil(c.cPop[k] / householdOf(c, k)) - 1) { homes = false; homesAt = w.stats.time; }
+      const short = c.cActive[k] && c.cHomeSlot[k] >= 0 && c.cHomes[k] < Math.ceil(c.cPop[k] / householdOf(c, k)) - 1;
+      if (!short) { shortSince[k] = -1; continue; }
+      if (shortSince[k] < 0) shortSince[k] = w.stats.time;
+      else if (w.stats.time - shortSince[k] >= 5) { homes = false; homesAt = shortSince[k]; }
     }
   }
   check(`growth ${seed}: by 3,600 s at least 12 people and a split`, at3600 >= 12 && splits3600 >= 1, `${at3600} people, ${splits3600} splits`);
@@ -220,6 +226,41 @@ for (const seed of SEEDS5B) {
   check('5c works: once the camp knows Paths the patch opens a work owned by that camp, built by its own people',
     yes.opened >= 0 && yes.camp === 0 && yes.mason, `order ${yes.opened}, camp ${yes.camp}, masons own-camp ${yes.mason}`);
 }
+// 5d-a: homes by stage. A camp's stage follows Shelter / Woodworking / Stonework; new homes are built at it; older
+// standing homes are rebuilt to it one per camp per 60 s (forced adoption on a camp that has grown a few homes)
+{
+  const w = mk(1337), c = w.civ;
+  while (w.stats.time < 1500) simStep(w);
+  let cp = 0; for (let k = 0; k < MAX_CAMPS; k++) if (c.cActive[k] && c.cHomes[k] > c.cHomes[cp]) cp = k;
+  const homes = () => { const o = []; for (let s = 0; s < c.nS; s++) if (c.sKind[s] === 0 && c.sCamp[s] === cp && c.sDecay[s] < 0.9) o.push(s); return o; };
+  for (const i of [IDEA_SHELTER, IDEA_WOOD, IDEA_STONE]) c.kAdopt[cp * N_IDEAS + i] = 0;   // back to hide shelters
+  for (let s = 0; s < c.nS; s++) if (c.sKind[s] === 0 && c.sCamp[s] === cp) c.sStage[s] = 0;
+  const st0 = campStage(c, cp), h0 = homes();
+  const learn = (idea) => { c.kAdopt[cp * N_IDEAS + idea] = 0.9; c.kUsed[cp * N_IDEAS + idea] = w.stats.time; };
+  learn(IDEA_SHELTER); learn(IDEA_WOOD);
+  const st1 = campStage(c, cp);
+  const ups = []; const prev = new Uint8Array(c.sStage);
+  const t0 = w.stats.time;
+  while (w.stats.time - t0 < 60 * (h0.length + 3)) {
+    simStep(w);
+    c.kUsed[cp * N_IDEAS + IDEA_SHELTER] = c.kUsed[cp * N_IDEAS + IDEA_WOOD] = w.stats.time;
+    c.kAdopt[cp * N_IDEAS + IDEA_STONE] = 0;   // no Stonework discovery mid-test
+    for (let s = 0; s < c.nS; s++) {
+      if (c.sKind[s] === 0 && c.sCamp[s] === cp && h0.includes(s) && c.sStage[s] > prev[s]) ups.push(w.stats.time);
+      prev[s] = c.sStage[s];
+    }
+  }
+  let gapOk = true; for (let i = 1; i < ups.length; i++) if (ups[i] - ups[i - 1] < SOCIETY.upgradeGap - 1.01) gapOk = false;
+  const hs = homes(); let stale = 0, newAt = 0, newN = 0;
+  for (const s of hs) { if (c.sStage[s] < 2 && c.sBuild[s] >= 1) stale++; if (!h0.includes(s)) { newN++; if (c.sStage[s] === 2) newAt++; } }
+  check('5d stage: camp stage follows Shelter/Woodworking (0 -> 2)', st0 === 0 && st1 === 2, `before ${st0}, after ${st1}`);
+  check('5d upgrade: older homes rebuilt to the camp stage, at most one per 60 s', ups.length >= Math.min(h0.length, 2) && gapOk && stale === 0,
+    `${h0.length} older homes, ${ups.length} upgrades, gaps ok ${gapOk}, still below stage ${stale}`);
+  check('5d new homes: built at the camp stage', newAt === newN, `${newAt} of ${newN} new homes at stage 2`);
+  learn(IDEA_STONE);
+  check('5d stage: Stonework makes stone houses (stage 3)', campStage(c, cp) === 3);
+}
+
 // 5c-1 and long-run checks: no Mason work before Bridges or Paths is known somewhere; every work opens for a camp that
 // knows its idea; Masons work for their own camp; Mystics only in Ritual camps, at most a tenth of the camp
 let worksAll = 0;
@@ -253,6 +294,9 @@ for (const seed of [1337, 4242, 7]) {
     if (bad) mystBad++;
   }
   worksAll += opens;
+  const byStage = [0, 0, 0, 0]; let over = 0;
+  for (let s = 0; s < c.nS; s++) if (c.sKind[s] === 0 && c.sDecay[s] < 0.9) { byStage[c.sStage[s]]++; if (c.sCamp[s] >= 0 && c.sStage[s] > 3) over++; }
+  check(`5d homes ${seed}: every standing home has a stage 0-3`, over === 0, `homes by stage ${byStage.join('/')} at 4,500 s`);
   check(`5c gating ${seed}: no Mason work before Bridges/Paths is known; each work opens for a camp that knows its idea`,
     early === 0 && badOpen === 0, `${opens} works, first at ${firstWork.toFixed(0)} s, early ${early}, wrong camp ${badOpen}`);
   check(`5c roles ${seed}: Masons build their own camp's works; Mystics only in Ritual camps, <= 10% (>= 98% of seconds)`,

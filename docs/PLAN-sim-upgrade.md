@@ -185,6 +185,11 @@ Detailed rules: `docs/SPEC-phase5-society.md`.
 - **5d** Models by stage: hide shelter -> wattle hut -> timber cottage -> stone house; villagers from hides to role
   tools. Includes the earlier asset goals (richer trees, crop rows, readable villager silhouettes) within the phone's
   ~60 fps budget.
+  Split in two (2026-10-22): **5d-1** homes by stage (shared timber/stone bodies plus one culture accent: windmill,
+  forge chimney, crystals), slow upgrades, cloaks and role tools per camp. Built on branch `phase5d-models` (spec
+  v1.3). **5d-2** richer trees, crop rows, silhouettes. Jordan's choices (2026-10-22): three tree species by
+  ground (broadleaf, conifer, flat-top scrub; reshaped crown, no new vertices), contour furrows from a field mask
+  in `texC.a`, and role colours that read at distance (hide-wearers get a role head wrap). Design in spec 6.1.
 - **5e** Long-run tuning with a timelapse extension of `tools/preview-map.mjs`; tuning runs logged with before/after.
 
 ## Open observations and questions (for later)

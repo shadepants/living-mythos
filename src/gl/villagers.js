@@ -5,11 +5,13 @@ import { kitNew, kitBox, kitFrustum, kitPyramid, kitFinish } from './geomkit.js'
 import { sampleGrid } from '../sim/sample.js';
 import { SIZE } from './scale.js';
 import { ST_PROCESSION, ST_GREET, ROLE_MYSTIC } from '../sim/civ.js';
-import { SOCIETY, GATE_RITUAL, homeStage } from '../sim/society.js';
+import { SOCIETY, campStage } from '../sim/society.js';
+import { campKnows, IDEA_BASKETS, IDEA_WOOD, IDEA_STONE, IDEA_RITUAL } from '../sim/knowhow.js';
 import { TUNING } from '../sim/tuning.js';
 
-// Figurine: pid 0 cloak (or hides), 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
-function createVillagerGeometry() {
+// Figurine: pid 0 cloak (or hides), 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick;
+// role tools in the left hand (5d): 6 basket, 7 tool handle, 8 axe head, 9 mallet head.
+export function createVillagerGeometry() {
   const b = kitNew();
   const yn = (y) => y / 0.42;
   kitFrustum(b, 0, 0.0, 0, 0.10, 0.045, 0.26, 6, 0, yn);
@@ -18,6 +20,10 @@ function createVillagerGeometry() {
   kitBox(b, 0, 0.17, -0.095, 0.11, 0.12, 0.07, 3, yn);
   kitBox(b, 0.115, 0.15, 0.05, 0.012, 0.24, 0.012, 5, yn);
   kitBox(b, 0.115, 0.045, 0.05, 0.05, 0.06, 0.05, 4, yn);
+  kitFrustum(b, -0.12, 0.03, 0.04, 0.032, 0.05, 0.065, 5, 6, yn);
+  kitBox(b, -0.115, 0.15, 0.05, 0.012, 0.24, 0.012, 7, yn);
+  kitBox(b, -0.115, 0.255, 0.075, 0.012, 0.05, 0.05, 8, yn);
+  kitBox(b, -0.115, 0.265, 0.05, 0.045, 0.035, 0.035, 9, yn);
   return kitFinish(b);
 }
 
@@ -50,12 +56,11 @@ export function createVillagers(caps) {
   const m = new THREE.Matrix4(), nrm = new THREE.Vector3(), nrmS = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3(), pos = new THREE.Vector3();
   const SCALE = SIZE.villager;
   const sa = state.array;
+  const TOOL_IDEA = [IDEA_BASKETS, IDEA_WOOD, IDEA_STONE, IDEA_RITUAL];   // by role: basket, axe, mallet, lantern
 
   // Orient along velocity, pitch into the slope, bob with the walk cycle (spec 4.2 Pool 3).
   mesh.userData.update = function update(world) {
     const civ = world.civ, elev = world.elev;
-    const cloaks = homeStage(civ, -1) >= 2 ? 4 : 0;   // + 4 on the role: cloaks from stage 2, hides before (spec 6)
-    const lanterns = (civ.gates & GATE_RITUAL) !== 0;   // lanterns come with Ritual
     for (let i = 0; i < n; i++) {
       const x = civ.vX[i], z = civ.vZ[i];
       const gxs = (sampleGrid(elev, x + 0.1, z) - sampleGrid(elev, x - 0.1, z)) / 0.2;
@@ -77,8 +82,10 @@ export function createVillagers(caps) {
       pos.set(x, y, z);
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);
-      const o = i * 4;
-      sa[o] = civ.vRole[i] + cloaks;
+      const o = i * 4, c = civ.vCamp[i], role = civ.vRole[i];
+      // role + 4 for cloaks (camp stage 2+, hides before) + 8 when the camp knows the role's tool idea (spec 6)
+      sa[o] = role + (campStage(civ, c) >= 2 ? 4 : 0) + (campKnows(civ, c, TOOL_IDEA[role]) ? 8 : 0);
+      const lanterns = campKnows(civ, c, IDEA_RITUAL);   // lanterns come with the camp's Ritual
       sa[o + 1] = civ.vCargo[i] + 2 * civ.vCargoKind[i];   // cargo 0..1 + 2 x kind (food / timber / stone)
       sa[o + 2] = ph;
       sa[o + 3] = !lanterns ? -1 : st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;   // -1: no lantern

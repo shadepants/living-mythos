@@ -1,5 +1,5 @@
 import { GRID_N } from './grid.js';
-import { ST_SETTLE } from './society.js';
+import { ST_SETTLE, restage } from './society.js';
 
 // Save / restore of the living world (spec 1.6). Typed arrays travel as base64; everything else as small JSON.
 export const SAVE_KEY = 'mythos.save.v1';
@@ -13,6 +13,8 @@ const CIV_F32 = ['vX', 'vZ', 'vVX', 'vVZ', 'vTX', 'vTZ', 'vCargo', 'vEnergy', 'v
   'kAdopt', 'kUsed', 'kNeed', 'kTrips', 'kFertSec', 'kRichSec', 'kFloodT'];
 const CIV_U8 = ['vRole', 'vState', 'sKind', 'sActive', 'mKind', 'mMotif', 'vAlive', 'cActive', 'kFirst'];
 const CIV_I32 = ['vHome', 'vAux', 'mStruct', 'mAnniv', 'monoStruct', 'vCamp', 'sCamp', 'cPop', 'cHomes', 'cHomeSlot'];
+// 5d additions, optional so a 5c save still loads (its homes then take their camp's current stage)
+const CIV_OPT_U8 = ['sStage'], CIV_OPT_F32 = ['cUpgT'];
 const CIV_NUM = ['nS', 'dwellings', 'nM', 'food', 'masons', 'built', 'bridges', 'revived', 'mythFlags', 'mythClock',
   'nAlive', 'emptyT', 'societyOn', 'gates', 'splits', 'discoveries', 'firstDiscT', 'kRngS'];
 
@@ -38,6 +40,8 @@ export function serializeWorld(world, extra) {
   for (const k of CIV_F32) out.c[k] = toB64(civ[k]);
   for (const k of CIV_U8) out.c[k] = toB64(civ[k]);
   for (const k of CIV_I32) out.c[k] = toB64(civ[k]);
+  for (const k of CIV_OPT_U8) out.c[k] = toB64(civ[k]);
+  for (const k of CIV_OPT_F32) out.c[k] = toB64(civ[k]);
   for (const k of CIV_NUM) out.n[k] = civ[k];
   return JSON.stringify(out);
 }
@@ -58,15 +62,27 @@ export function restoreWorld(world, text) {
     for (const k of CIV_F32) { const a = fromB64(data.c[k], Float32Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]); }
     for (const k of CIV_U8) { const a = fromB64(data.c[k], Uint8Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]); }
     for (const k of CIV_I32) { const a = fromB64(data.c[k], Int32Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]); }
+    for (const k of CIV_OPT_U8) {
+      if (data.c[k] === undefined) continue;
+      const a = fromB64(data.c[k], Uint8Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]);
+    }
+    for (const k of CIV_OPT_F32) {
+      if (data.c[k] === undefined) continue;
+      const a = fromB64(data.c[k], Float32Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]);
+    }
     for (const k of CIV_NUM) if (typeof data.n[k] !== 'number' || !Number.isFinite(data.n[k])) return { ok: false };
   } catch (e) { return { ok: false }; }
   // sanity: elevations and fertility must be finite and in range before we trust the data
   for (const [target, src] of staged) {
     if (target === world.elev) { for (let i = 0; i < GRID_N; i++) if (!Number.isFinite(src[i]) || src[i] > 10 || src[i] < -10) return { ok: false }; }
+    if (target === civ.sStage) { for (let i = 0; i < src.length; i++) if (src[i] > 3) return { ok: false }; }
     if (target === world.fertility || target === world.biomass || target === civ.kAdopt) { for (let i = 0; i < src.length; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
   }
+  if (data.c.sStage === undefined) civ.sStage.fill(0);
+  if (data.c.cUpgT === undefined) civ.cUpgT.fill(0);
   for (const [target, src] of staged) target.set(src);
   for (const k of CIV_NUM) civ[k] = data.n[k];
+  if (data.c.sStage === undefined) for (let s = 0; s < civ.nS; s++) if (civ.sKind[s] === 0) restage(civ, s);
   world.stats.time = data.time || 0;
   // runtime-only state that is not saved: orders restart, builders go home, unfinished works are considered done
   civ.oState.fill(0); civ.oWorker.fill(-1); civ.oStruct.fill(-1); civ.vJob.fill(-1);

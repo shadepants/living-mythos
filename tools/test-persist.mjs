@@ -48,6 +48,24 @@ check('corrupt: wrong version is rejected', restoreWorld(fresh, text.replace('"v
   bad.w.biomass = Buffer.from(arr.buffer).toString('base64');
   check('corrupt: out-of-range biomass is rejected', restoreWorld(createWorld(1337), JSON.stringify(bad)).ok === false);
 }
+{ // 5d home stages: round-trip, and a 5c save (no sStage/cUpgT) restores with homes at their camp's stage
+  const src = JSON.parse(text);
+  const st = new Uint8Array(a.civ.sStage); st[a.civ.cHomeSlot[0]] = 1;
+  src.c.sStage = Buffer.from(st.buffer).toString('base64');
+  const w1 = createWorld(1337);
+  check('5d restore: home stages round-trip', restoreWorld(w1, JSON.stringify(src)).ok && w1.civ.sStage[a.civ.cHomeSlot[0]] === 1 && same(w1.civ.cUpgT, a.civ.cUpgT));
+  const old = JSON.parse(text); delete old.c.sStage; delete old.c.cUpgT;
+  const kS = new Float32Array(a.civ.kAdopt); kS[0 * 10 + 1] = 0.9;   // camp 0 knows Shelter
+  old.c.kAdopt = Buffer.from(kS.buffer).toString('base64');
+  const w2 = createWorld(1337);
+  const r2 = restoreWorld(w2, JSON.stringify(old));
+  let ok = r2.ok;
+  for (let s = 0; s < w2.civ.nS; s++) if (w2.civ.sKind[s] === 0 && w2.civ.sCamp[s] === 0 && w2.civ.sStage[s] !== 1) ok = false;
+  check('5d restore: a 5c save (no stages) loads; camp 0 homes take its stage (Shelter -> wattle hut)', ok);
+  const bad = JSON.parse(text); const b8 = new Uint8Array(a.civ.sStage.length).fill(7);
+  bad.c.sStage = Buffer.from(b8.buffer).toString('base64');
+  check('corrupt: an out-of-range home stage is rejected', restoreWorld(createWorld(1337), JSON.stringify(bad)).ok === false);
+}
 check('corrupt: a save from another seed is rejected', restoreWorld(createWorld(5), text).ok === false);
 const poisoned = JSON.parse(text); const e = new Float32Array(128 * 128).fill(99); poisoned.w.elev = Buffer.from(e.buffer).toString('base64');
 check('corrupt: out-of-range elevations are rejected', restoreWorld(fresh, JSON.stringify(poisoned)).ok === false);

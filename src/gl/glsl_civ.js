@@ -17,14 +17,18 @@ uniform sampler2D uSimTexC;
 uniform float uNight;
 bool isPid(float pid, float id) { return abs(pid - id) < 0.5; }
 float partVis(float pid, float kind, float stage, float wP, float wI, float wM) {
-  if (kind < 0.5 && stage < 0.5) return (isPid(pid, 25.0) || isPid(pid, 26.0) || isPid(pid, 27.0)) ? 1.0 : 0.0;   // hide shelter
-  if (isPid(pid, 0.0)) return kind < 0.5 ? 1.0 : 0.0;
-  if (kind < 0.5) {
-    if (isPid(pid, 1.0) || isPid(pid, 2.0) || isPid(pid, 5.0) || isPid(pid, 13.0)) return wP;
-    if (isPid(pid, 11.0) || isPid(pid, 4.0) || isPid(pid, 14.0)) return wI;
-    if (isPid(pid, 3.0) || isPid(pid, 10.0) || isPid(pid, 15.0)) return wM;
+  if (kind < 0.5) {   // homes by stage (spec 6): hide shelter, wattle hut, timber cottage, stone house
+    if (stage < 0.5) return (isPid(pid, 25.0) || isPid(pid, 26.0) || isPid(pid, 27.0)) ? 1.0 : 0.0;
+    if (stage < 1.5) return (isPid(pid, 28.0) || isPid(pid, 29.0) || isPid(pid, 34.0)) ? 1.0 : 0.0;
+    if (isPid(pid, 0.0)) return 1.0;
+    if (stage < 2.5) { if (isPid(pid, 30.0) || isPid(pid, 31.0) || isPid(pid, 2.0) || isPid(pid, 35.0)) return 1.0; }
+    else if (isPid(pid, 32.0) || isPid(pid, 33.0) || isPid(pid, 36.0)) return 1.0;
+    if (isPid(pid, 5.0) || isPid(pid, 13.0)) return wP;   // culture accents from stage 2
+    if (isPid(pid, 4.0)) return wI;
+    if (isPid(pid, 3.0)) return wM;
     return 0.0;
   }
+  if (isPid(pid, 0.0)) return 0.0;
   if (kind < 1.5) return (isPid(pid, 8.0) || isPid(pid, 17.0) || isPid(pid, 18.0) || isPid(pid, 19.0)) ? 1.0 : 0.0;
   if (kind < 2.5) return (isPid(pid, 6.0) || isPid(pid, 9.0) || isPid(pid, 20.0) || isPid(pid, 22.0)) ? 1.0 : 0.0;
   if (kind < 3.5) return isPid(pid, 7.0) ? 1.0 : 0.0;
@@ -33,16 +37,11 @@ float partVis(float pid, float kind, float stage, float wP, float wI, float wM) 
 }
 vec3 partColor(float pid, float hv) {
   if (isPid(pid, 0.0)) return lin(vec3(0.46, 0.44, 0.42));
-  if (isPid(pid, 1.0)) return lin(vec3(0.84, 0.73, 0.55));
   if (isPid(pid, 2.0)) return lin(vec3(0.74, 0.56, 0.24) * (0.85 + 0.3 * hv));
   if (isPid(pid, 5.0)) return lin(vec3(0.82, 0.74, 0.58));
   if (isPid(pid, 13.0)) return lin(vec3(0.38, 0.27, 0.17));
-  if (isPid(pid, 11.0)) return lin(vec3(0.20, 0.20, 0.25) * (0.8 + 0.4 * hv));
   if (isPid(pid, 4.0)) return lin(vec3(0.36, 0.20, 0.16));
-  if (isPid(pid, 14.0)) return lin(vec3(0.50, 0.48, 0.46));
   if (isPid(pid, 3.0)) return lin(vec3(0.56, 0.72, 0.96));
-  if (isPid(pid, 10.0)) return lin(vec3(0.24, 0.24, 0.30));
-  if (isPid(pid, 15.0)) return lin(vec3(0.82, 0.70, 0.38));
   if (isPid(pid, 8.0)) return lin(vec3(0.11, 0.11, 0.14));
   if (isPid(pid, 19.0)) return lin(vec3(0.18, 0.17, 0.19));
   if (isPid(pid, 17.0)) return lin(vec3(1.0, 0.78, 0.28));
@@ -57,6 +56,13 @@ vec3 partColor(float pid, float hv) {
   if (isPid(pid, 25.0)) return lin(vec3(0.60, 0.45, 0.30) * (0.85 + 0.3 * hv));
   if (isPid(pid, 26.0)) return lin(vec3(0.30, 0.21, 0.13));
   if (isPid(pid, 27.0)) return lin(vec3(0.17, 0.12, 0.08));
+  if (isPid(pid, 28.0)) return lin(vec3(0.50, 0.38, 0.22) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 29.0)) return lin(vec3(0.70, 0.56, 0.28) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 30.0)) return lin(vec3(0.62, 0.46, 0.29) * (0.9 + 0.2 * hv));
+  if (isPid(pid, 31.0)) return lin(vec3(0.27, 0.18, 0.11));
+  if (isPid(pid, 32.0)) return lin(vec3(0.58, 0.58, 0.57) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 33.0)) return lin(vec3(0.30, 0.31, 0.36) * (0.85 + 0.3 * hv));
+  if (pid > 33.5) return lin(vec3(0.20, 0.13, 0.08));   // doors
   return lin(vec3(0.18, 0.16, 0.15));
 }
 `;
@@ -101,7 +107,7 @@ export const GLSL_STRUCT_POS = /* glsl */`
     float ta = hash12(sBase.xz * 7.1) * 6.283;
     vec2 ax = vec2(cos(ta), sin(ta));
     lp.xz += ax * lp.y * decay * 0.35;
-    if (isPid(pid, 2.0) || isPid(pid, 3.0) || isPid(pid, 25.0)) { lp.y -= decay * 0.12; lp.xz += ax * decay * 0.1; }
+    if (isPid(pid, 2.0) || isPid(pid, 3.0) || isPid(pid, 25.0) || isPid(pid, 29.0) || isPid(pid, 33.0)) { lp.y -= decay * 0.12; lp.xz += ax * decay * 0.1; }
     lp += (vec3(hash12(lp.xz * 31.0), hash12(lp.yz * 29.0 + 1.0), hash12(lp.xy * 27.0 + 2.0)) - 0.5) * 0.045 * decay;
   }
 
@@ -132,7 +138,6 @@ export const GLSL_STRUCT_POS = /* glsl */`
   float nightK = 0.35 + 0.65 * uNight;
   float aliveK = kind < 0.5 ? 1.0 - decay * 0.9 : 1.0;
   if (isPid(pid, 3.0)) sgl = vec3(0.30, 0.70, 1.0) * (nightK + lum) * (0.3 + 0.9 * yn);
-  else if (isPid(pid, 10.0) && position.y > 0.33) sgl = vec3(0.45, 0.85, 1.0) * (0.5 + uNight * 1.5 + lum);
   else if (isPid(pid, 4.0)) sgl = vec3(1.0, 0.42, 0.10) * (0.5 + uNight * 1.2) * smoothstep(0.7, 1.0, yn * 1.1);
   else if (isPid(pid, 17.0) || isPid(pid, 18.0)) sgl = vec3(1.0, 0.72, 0.22) * (0.6 + uNight * 1.4 + lum);
   else if ((isPid(pid, 21.0) && position.y > 0.33) || isPid(pid, 22.0)) sgl = vec3(1.0, 0.62, 0.22) * (0.4 + uNight * 2.0);
@@ -209,8 +214,10 @@ vec3 lin2(vec3 c) { return pow(c, vec3(2.2)); }
 `;
 
 export const GLSL_VILL_POS = /* glsl */`
-  float cloaked = step(3.5, aInstanceState.x);   // role + 4: cloaks; plain role: hides (home stage < 2)
-  float role = aInstanceState.x - 4.0 * cloaked;
+  float tool = step(7.5, aInstanceState.x);   // + 8: the camp knows this role's tool idea
+  float rc = aInstanceState.x - 8.0 * tool;
+  float cloaked = step(3.5, rc);   // role + 4: cloaks; plain role: hides (camp stage < 2)
+  float role = rc - 4.0 * cloaked;
   float cargoKind = floor(aInstanceState.y * 0.5);   // 0 food, 1 timber, 2 stone
   float cargo = aInstanceState.y - cargoKind * 2.0;
   float phase = aInstanceState.z;
@@ -225,6 +232,13 @@ export const GLSL_VILL_POS = /* glsl */`
     lp = pivot + (lp - pivot) * clamp(cargo * 1.5, 0.0, 1.0);
   }
   if (lant < -0.5 && (abs(vpid - 4.0) < 0.5 || abs(vpid - 5.0) < 0.5)) lp = vec3(0.0);   // no lantern before Ritual
+  if (vpid > 5.5) {   // role tools: forager basket, hauler axe, mason mallet
+    float want = abs(vpid - 6.0) < 0.5 ? step(role, 0.5)
+      : abs(vpid - 7.0) < 0.5 ? step(0.5, role) * step(role, 2.5)
+      : abs(vpid - 8.0) < 0.5 ? step(0.5, role) * step(role, 1.5)
+      : step(1.5, role) * step(role, 2.5);
+    lp *= want * tool;
+  }
   vec3 transformed = lp;
   vec3 cloakC = role < 0.5 ? vec3(0.36, 0.50, 0.24) : role < 1.5 ? vec3(0.62, 0.46, 0.26) : role < 2.5 ? vec3(0.34, 0.42, 0.58) : vec3(0.50, 0.30, 0.66);
   float hh = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.547);
@@ -235,7 +249,10 @@ export const GLSL_VILL_POS = /* glsl */`
   if (abs(vpid - 1.0) < 0.5) vc = vec3(0.86, 0.70, 0.56);
   else if (abs(vpid - 2.0) < 0.5) vc = cloakC * 0.7;
   else if (abs(vpid - 3.0) < 0.5) vc = cargoKind < 0.5 ? vec3(0.55, 0.40, 0.22) : cargoKind < 1.5 ? vec3(0.36, 0.22, 0.11) : vec3(0.58, 0.58, 0.62);
-  else if (abs(vpid - 5.0) < 0.5) vc = vec3(0.20, 0.15, 0.10);
+  else if (abs(vpid - 5.0) < 0.5 || abs(vpid - 7.0) < 0.5) vc = vec3(0.20, 0.15, 0.10);
+  else if (abs(vpid - 6.0) < 0.5) vc = vec3(0.66, 0.50, 0.27);
+  else if (abs(vpid - 8.0) < 0.5) vc = vec3(0.56, 0.56, 0.60);
+  else if (abs(vpid - 9.0) < 0.5) vc = vec3(0.46, 0.33, 0.20);
   else if (abs(vpid - 4.0) < 0.5) { vc = vec3(1.0, 0.8, 0.4); vg = vec3(1.0, 0.66, 0.24) * (0.25 + clamp(uNight * 1.4 + lant, 0.0, 2.0) * 1.8); }
   vVCol = lin2(vc);
   vVGlow = vg;

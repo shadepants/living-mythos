@@ -3,7 +3,7 @@ import { GRID_W, GRID_H } from './grid.js';
 import { sampleGrid, worldToGridX, worldToGridZ } from './sample.js';
 import {
   createKnowhowArrays, clearCamp, splitCarry, knowhowTick, knows, anyKnows,
-  IDEA_SHELTER, IDEA_FARMING, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL, IDEA_STORAGE,
+  IDEA_SHELTER, IDEA_FARMING, IDEA_WOOD, IDEA_STONE, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL, IDEA_STORAGE,
 } from './knowhow.js';
 
 // Phase 5a: the island starts with one family that grows, splits into camps and can die out locally
@@ -23,19 +23,31 @@ const S = {
   emptyWait: 60, settleGiveUp: 150,
   campClearRadius: 1.0, campClearLevel: 0.15,   // trampled grass around homes before Farming (civ secondTick)
   shelterHousehold: 4, farmCap: 1.5, storeCap: 1.25, spoilRate: 0.005, mysticShare: 0.1,   // 5c unlocks (spec 5)
+  upgradeGap: 60,   // 5d: a camp rebuilds at most one older home to its current stage per minute (spec 6)
 };
 export const SOCIETY = Object.freeze(S);
 
-// Home model stage (spec 6): 0 hide shelter, 1 wattle hut, 2 timber cottage (culture archetypes), 3 stone house.
-// A society camp has no know-how yet in 5a, so its homes are hide shelters; the full town shows its cottages.
-// 5b/5d replace this with the highest of Shelter, Woodworking and Stonework known in the home's camp.
-export function homeStage(civ, s) { void s; return civ.societyOn === 1 ? 0 : 2; }
+// Home model stage (spec 6): 0 hide shelter, 1 wattle hut, 2 timber cottage, 3 stone house; culture accents from 2.
+// A camp's stage is the highest of Shelter, Woodworking and Stonework it knows; the full town (society off) is stage 2.
+export function campStage(civ, c) {
+  if (civ.societyOn === 0) return 2;
+  return knows(civ, c, IDEA_STONE) ? 3 : knows(civ, c, IDEA_WOOD) ? 2 : knows(civ, c, IDEA_SHELTER) ? 1 : 0;
+}
+// a home keeps the stage it was built at until it is rebuilt, revived or upgraded
+export function homeStage(civ, s) { return civ.societyOn === 0 ? 2 : civ.sStage[s]; }
+// rebuilt or revived: the home takes its camp's current stage if that is higher
+export function restage(civ, s) {
+  const c = civ.sCamp[s];
+  if (civ.societyOn === 0 || c < 0) return;
+  const st = campStage(civ, c);
+  if (st > civ.sStage[s]) civ.sStage[s] = st;
+}
 
 export function createSocietyArrays(nV, nS) {
   const f = (n) => new Float32Array(n), i32 = (n) => new Int32Array(n).fill(-1);
   return {
     vAlive: new Uint8Array(nV), vAge: f(nV), vLife: f(nV), vCamp: i32(nV),
-    sCamp: i32(nS),
+    sCamp: i32(nS), sStage: new Uint8Array(nS), cUpgT: f(MAX_CAMPS),
     cActive: new Uint8Array(MAX_CAMPS), cX: f(MAX_CAMPS), cZ: f(MAX_CAMPS), cFood: f(MAX_CAMPS),
     cBirthT: f(MAX_CAMPS), cSplitT: f(MAX_CAMPS), cStarveT: f(MAX_CAMPS), cFounded: f(MAX_CAMPS),
     cPop: new Int32Array(MAX_CAMPS), cHomes: new Int32Array(MAX_CAMPS), cHomeSlot: i32(MAX_CAMPS),
@@ -118,7 +130,7 @@ function addHome(world, c, x, z, build) {
   }
   civ.sBuild[s] = build; civ.sRot[s] = world.rng.next() * 6.283;
   civ.sBias[s] = sampleGrid(world.culturalBias, x, z);
-  civ.sCamp[s] = c;
+  civ.sCamp[s] = c; civ.sStage[s] = campStage(civ, c);
   if (civ.cHomeSlot[c] < 0) civ.cHomeSlot[c] = s;
   return s;
 }
@@ -308,6 +320,17 @@ function wanderers(world) {
   }
 }
 
+// 5d: one standing home below the camp's stage is torn down and rebuilt at it (lowest slot first; no rng)
+function upgradeHome(civ, c, t) {
+  if (t - civ.cUpgT[c] < S.upgradeGap) return;
+  const st = campStage(civ, c);
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sCamp[s] !== c || !homeHealthy(civ, s) || civ.sBuild[s] < 1 || civ.sStage[s] >= st) continue;
+    civ.sStage[s] = st; civ.sBuild[s] = 0.02; civ.cUpgT[c] = t;
+    return;
+  }
+}
+
 export function societyTick(world) {
   const civ = world.civ;
   if (civ.societyOn === 0) return;
@@ -361,7 +384,7 @@ export function societyTick(world) {
     const want = Math.ceil(civ.cPop[c] / householdOf(civ, c));
     const ruin = civ.cHomes[c] < want && civ.cFood[c] >= S.homeFood ? ownRuin(world, c) : -1;
     if (ruin >= 0) {
-      civ.sDecay[ruin] = 0; civ.sBuild[ruin] = 0.02; civ.sEpoch++;
+      civ.sDecay[ruin] = 0; civ.sBuild[ruin] = 0.02; civ.sEpoch++; civ.sStage[ruin] = campStage(civ, c);
       civ.cFood[c] -= S.homeFood; civ.cHomes[c]++;
     } else if (civ.cHomes[c] < want && civ.cFood[c] >= S.homeFood) {
       for (let k = 0; k < 40; k++) {
@@ -372,6 +395,7 @@ export function societyTick(world) {
         break;
       }
     }
+    upgradeHome(civ, c, t);
     trySplit(world, c);
   }
   knowhowTick(world, MAX_CAMPS, campCap);

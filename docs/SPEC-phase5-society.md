@@ -240,6 +240,26 @@ camp's villagers become its Masons.
   silhouettes.
 - **Budget:** villager mesh ≤ 2× today's vertex count; phone fps average ≥ 50.
 
+### 6.1 5d-2 design (agreed with Jordan 2026-10-22; not built yet)
+- **Trees, three species by ground**, chosen in the flora vertex shader from data it already samples (elevation,
+  slope, fertility, moisture) plus the per-tuft hash, so neighbours mix at the borders:
+  - broadleaf (today's crown) on fertile lowland;
+  - conifer on high or steep ground: the same crown vertices reshaped into a tall narrow cone (ring pulled down
+    and in, top raised), darker blue-green;
+  - flat-top scrub on dry ground: crown flattened and widened, short trunk, olive.
+  The crown keeps its 36 vertices, so the flora mesh does not grow (108 vertices × up to 3,500 instances).
+- **Crop rows, as contour furrows:** a per-cell field mask (0..1) goes in the unused alpha of `texC`, uploaded
+  with biomass every ~16 frames. CPU fills it in the 1 Hz home-clearing pass: cells within `homeClearRadius` of a
+  healthy home whose camp knows Farming (the town: `GATE_FARM`), fading out at the edge. The terrain shader draws
+  furrow stripes along the contour lines (stripes in elevation) where the mask is set. Flora tufts in fields
+  become even-height golden crop and never show trees. No new mesh, no new draw call.
+- **Villager role colour at distance:** cloaks are already tinted by role (green forager, tan hauler, blue
+  mason, purple mystic). Hide-wearers (camp stage 0-1) get a role-coloured head wrap. Role colours become more
+  saturated with camera distance so groups read at island zoom. No new vertices if the head cap is recoloured.
+- **Checks:** a `test-geo` check that the flora vertex count is unchanged; a CPU test that the field mask is
+  set only around Farming camps' healthy homes; llvmpipe frames of each species, a field and a mixed group;
+  then the phone (fps average ≥ 50).
+
 ## 7. Save format
 
 - `SAVE_VERSION = 3`. New fields:
@@ -261,7 +281,8 @@ Seeds for the multi-seed tests: 1337, 7, 4242 (5a); add 99 and 2026 for 5b and 5
 2. Determinism: the same seed after 2,000 substeps gives identical `nAlive`, camp count and villager positions.
 3. Growth: on each seed, by 3,600 sim s `nAlive ≥ 12` and at least one split has happened.
 4. Stability: on each seed through 7,200 sim s, `nAlive` stays in [1, 120] except during floor-rule gaps, and
-   `cHomes ≥ ceil(cPop / 3) − 1` for every settled camp (a settling party has no home until it arrives).
+   `cHomes ≥ ceil(cPop / household) − 1` for every settled camp (a settling party has no home until it arrives); a
+   shortfall shorter than 5 sim s (two homes ruined in one tick, before the 1 Hz recount and rebuild) does not count.
 5. Starvation: a camp with `cFood = 0` and foraging blocked loses one member per ~60 s, then becomes inactive.
 6. Floor: killing everyone spawns a wandering family of 4 within 60-62 sim s.
 7. Heap test: zero allocation in `civStep` with the society code over 5,000 substeps.
@@ -294,6 +315,35 @@ Seeds for the multi-seed tests: 1337, 7, 4242 (5a); add 99 and 2026 for 5b and 5
 - Weather (atmosphere) is render-side only, so the sim cannot use it. Shelter's need uses soil moisture and floods instead.
 
 ## Changelog
+
+### v1.3 - 2026-10-22 (5d-1 built: homes and villagers by stage)
+- 5d is split in two (Jordan, 2026-10-22): 5d-1 homes and villagers (this entry); 5d-2 richer trees, crop rows and
+  villager silhouettes, each part checked on the phone.
+- Stage 2 and 3 bodies are shared by every culture (Jordan chose "shared body + accent"): stage 2 is a timber cottage
+  (plank walls, dark frame, thatch), stage 3 a stone house (dressed stone, slate roof, plinth). The culture adds one
+  accent from stage 2: Pastoral windmill, Industrious forge chimney, Mystical crystals. The old full archetype
+  buildings (windmill cottage, quarry house, crystal shrine) are gone, so the `?town=1` start now shows stage 2
+  timber cottages with accents. Stage 1 is a round wattle hut with a thatch cone.
+- `campStage(civ, c)` (society.js) = 3 Stonework, 2 Woodworking, 1 Shelter, else 0; the town is 2. Each home keeps
+  the stage it was built at in `sStage` (Uint8, saved). New homes, in-place rebuilds of ruins and revivals (Ritual or
+  monolith) take the camp's current stage; a revival never lowers it.
+- Upgrades: once a minute per camp (`SOCIETY.upgradeGap` = 60, clock `cUpgT`, saved), the lowest-numbered standing,
+  finished home below the camp's stage is rebuilt at it (it rises again from `sBuild` 0.02). No food cost and no
+  `world.rng` use, but a home being rebuilt is not a finished home (villagers, decay and paths skip it), so runs
+  still diverge from 5c after the first upgrade. A home whose camp forgets an idea keeps its stage.
+- Saves: `sStage` and `cUpgT` are optional fields, so a 5c save still loads (its homes take their camp's current
+  stage); `SAVE_VERSION` stays 3. A stage above 3 is rejected as corrupt.
+- Villagers: cloaks when their own camp is at stage 2+ (was island-wide), hides before. Role tools in the left hand
+  when the camp knows the role's idea: forager basket (Baskets), hauler axe (Woodworking), Mason mallet
+  (Stonework). Lanterns stay the Mystic's tool, but follow the villager's own camp's Ritual (was island-wide) and
+  are still carried by everyone in a Ritual camp. Villager mesh 288 -> 456 vertices (budget 576).
+- Tests: `test-society` 5d block (stage follows ideas; older homes upgraded one per 60 s; new homes at the camp
+  stage; Stonework gives stage 3) and a stage-range check on the long-run seeds; `test-persist` stage round-trip,
+  5c-save fallback and corrupt stage; `test-geo` villager vertex budget.
+- Test change (5a test 4): a home shortfall now counts only if it lasts ≥ 5 sim s. With 5d, seed 7 had two homes of
+  one camp fall to ruin in the same tick at 5,418 s (one flooded); one was revived within a second, but `cHomes` is
+  recounted at 1 Hz, so the per-substep check saw 4 homes for 22 people for ~1 s. The 5c code on the same seed has no
+  shortfall; 5d only changed the trajectory. A camp that really fails to rebuild stays short far longer than 5 s.
 
 ### v1.2 - 2026-10-22 (5c built)
 - The gating map (section 5) is per camp: `campKnows`/`knows` in `knowhow.js`; `campCap(civ, c)` and

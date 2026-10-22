@@ -1799,14 +1799,18 @@ uniform sampler2D uSimTexC;
 uniform float uNight;
 bool isPid(float pid, float id) { return abs(pid - id) < 0.5; }
 float partVis(float pid, float kind, float stage, float wP, float wI, float wM) {
-  if (kind < 0.5 && stage < 0.5) return (isPid(pid, 25.0) || isPid(pid, 26.0) || isPid(pid, 27.0)) ? 1.0 : 0.0;   // hide shelter
-  if (isPid(pid, 0.0)) return kind < 0.5 ? 1.0 : 0.0;
-  if (kind < 0.5) {
-    if (isPid(pid, 1.0) || isPid(pid, 2.0) || isPid(pid, 5.0) || isPid(pid, 13.0)) return wP;
-    if (isPid(pid, 11.0) || isPid(pid, 4.0) || isPid(pid, 14.0)) return wI;
-    if (isPid(pid, 3.0) || isPid(pid, 10.0) || isPid(pid, 15.0)) return wM;
+  if (kind < 0.5) {   // homes by stage (spec 6): hide shelter, wattle hut, timber cottage, stone house
+    if (stage < 0.5) return (isPid(pid, 25.0) || isPid(pid, 26.0) || isPid(pid, 27.0)) ? 1.0 : 0.0;
+    if (stage < 1.5) return (isPid(pid, 28.0) || isPid(pid, 29.0) || isPid(pid, 34.0)) ? 1.0 : 0.0;
+    if (isPid(pid, 0.0)) return 1.0;
+    if (stage < 2.5) { if (isPid(pid, 30.0) || isPid(pid, 31.0) || isPid(pid, 2.0) || isPid(pid, 35.0)) return 1.0; }
+    else if (isPid(pid, 32.0) || isPid(pid, 33.0) || isPid(pid, 36.0)) return 1.0;
+    if (isPid(pid, 5.0) || isPid(pid, 13.0)) return wP;   // culture accents from stage 2
+    if (isPid(pid, 4.0)) return wI;
+    if (isPid(pid, 3.0)) return wM;
     return 0.0;
   }
+  if (isPid(pid, 0.0)) return 0.0;
   if (kind < 1.5) return (isPid(pid, 8.0) || isPid(pid, 17.0) || isPid(pid, 18.0) || isPid(pid, 19.0)) ? 1.0 : 0.0;
   if (kind < 2.5) return (isPid(pid, 6.0) || isPid(pid, 9.0) || isPid(pid, 20.0) || isPid(pid, 22.0)) ? 1.0 : 0.0;
   if (kind < 3.5) return isPid(pid, 7.0) ? 1.0 : 0.0;
@@ -1815,16 +1819,11 @@ float partVis(float pid, float kind, float stage, float wP, float wI, float wM) 
 }
 vec3 partColor(float pid, float hv) {
   if (isPid(pid, 0.0)) return lin(vec3(0.46, 0.44, 0.42));
-  if (isPid(pid, 1.0)) return lin(vec3(0.84, 0.73, 0.55));
   if (isPid(pid, 2.0)) return lin(vec3(0.74, 0.56, 0.24) * (0.85 + 0.3 * hv));
   if (isPid(pid, 5.0)) return lin(vec3(0.82, 0.74, 0.58));
   if (isPid(pid, 13.0)) return lin(vec3(0.38, 0.27, 0.17));
-  if (isPid(pid, 11.0)) return lin(vec3(0.20, 0.20, 0.25) * (0.8 + 0.4 * hv));
   if (isPid(pid, 4.0)) return lin(vec3(0.36, 0.20, 0.16));
-  if (isPid(pid, 14.0)) return lin(vec3(0.50, 0.48, 0.46));
   if (isPid(pid, 3.0)) return lin(vec3(0.56, 0.72, 0.96));
-  if (isPid(pid, 10.0)) return lin(vec3(0.24, 0.24, 0.30));
-  if (isPid(pid, 15.0)) return lin(vec3(0.82, 0.70, 0.38));
   if (isPid(pid, 8.0)) return lin(vec3(0.11, 0.11, 0.14));
   if (isPid(pid, 19.0)) return lin(vec3(0.18, 0.17, 0.19));
   if (isPid(pid, 17.0)) return lin(vec3(1.0, 0.78, 0.28));
@@ -1839,6 +1838,13 @@ vec3 partColor(float pid, float hv) {
   if (isPid(pid, 25.0)) return lin(vec3(0.60, 0.45, 0.30) * (0.85 + 0.3 * hv));
   if (isPid(pid, 26.0)) return lin(vec3(0.30, 0.21, 0.13));
   if (isPid(pid, 27.0)) return lin(vec3(0.17, 0.12, 0.08));
+  if (isPid(pid, 28.0)) return lin(vec3(0.50, 0.38, 0.22) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 29.0)) return lin(vec3(0.70, 0.56, 0.28) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 30.0)) return lin(vec3(0.62, 0.46, 0.29) * (0.9 + 0.2 * hv));
+  if (isPid(pid, 31.0)) return lin(vec3(0.27, 0.18, 0.11));
+  if (isPid(pid, 32.0)) return lin(vec3(0.58, 0.58, 0.57) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 33.0)) return lin(vec3(0.30, 0.31, 0.36) * (0.85 + 0.3 * hv));
+  if (pid > 33.5) return lin(vec3(0.20, 0.13, 0.08));   // doors
   return lin(vec3(0.18, 0.16, 0.15));
 }
 `;
@@ -1883,7 +1889,7 @@ const GLSL_STRUCT_POS = /* glsl */`
     float ta = hash12(sBase.xz * 7.1) * 6.283;
     vec2 ax = vec2(cos(ta), sin(ta));
     lp.xz += ax * lp.y * decay * 0.35;
-    if (isPid(pid, 2.0) || isPid(pid, 3.0) || isPid(pid, 25.0)) { lp.y -= decay * 0.12; lp.xz += ax * decay * 0.1; }
+    if (isPid(pid, 2.0) || isPid(pid, 3.0) || isPid(pid, 25.0) || isPid(pid, 29.0) || isPid(pid, 33.0)) { lp.y -= decay * 0.12; lp.xz += ax * decay * 0.1; }
     lp += (vec3(hash12(lp.xz * 31.0), hash12(lp.yz * 29.0 + 1.0), hash12(lp.xy * 27.0 + 2.0)) - 0.5) * 0.045 * decay;
   }
 
@@ -1914,7 +1920,6 @@ const GLSL_STRUCT_POS = /* glsl */`
   float nightK = 0.35 + 0.65 * uNight;
   float aliveK = kind < 0.5 ? 1.0 - decay * 0.9 : 1.0;
   if (isPid(pid, 3.0)) sgl = vec3(0.30, 0.70, 1.0) * (nightK + lum) * (0.3 + 0.9 * yn);
-  else if (isPid(pid, 10.0) && position.y > 0.33) sgl = vec3(0.45, 0.85, 1.0) * (0.5 + uNight * 1.5 + lum);
   else if (isPid(pid, 4.0)) sgl = vec3(1.0, 0.42, 0.10) * (0.5 + uNight * 1.2) * smoothstep(0.7, 1.0, yn * 1.1);
   else if (isPid(pid, 17.0) || isPid(pid, 18.0)) sgl = vec3(1.0, 0.72, 0.22) * (0.6 + uNight * 1.4 + lum);
   else if ((isPid(pid, 21.0) && position.y > 0.33) || isPid(pid, 22.0)) sgl = vec3(1.0, 0.62, 0.22) * (0.4 + uNight * 2.0);
@@ -1991,8 +1996,10 @@ vec3 lin2(vec3 c) { return pow(c, vec3(2.2)); }
 `;
 
 const GLSL_VILL_POS = /* glsl */`
-  float cloaked = step(3.5, aInstanceState.x);   // role + 4: cloaks; plain role: hides (home stage < 2)
-  float role = aInstanceState.x - 4.0 * cloaked;
+  float tool = step(7.5, aInstanceState.x);   // + 8: the camp knows this role's tool idea
+  float rc = aInstanceState.x - 8.0 * tool;
+  float cloaked = step(3.5, rc);   // role + 4: cloaks; plain role: hides (camp stage < 2)
+  float role = rc - 4.0 * cloaked;
   float cargoKind = floor(aInstanceState.y * 0.5);   // 0 food, 1 timber, 2 stone
   float cargo = aInstanceState.y - cargoKind * 2.0;
   float phase = aInstanceState.z;
@@ -2007,6 +2014,13 @@ const GLSL_VILL_POS = /* glsl */`
     lp = pivot + (lp - pivot) * clamp(cargo * 1.5, 0.0, 1.0);
   }
   if (lant < -0.5 && (abs(vpid - 4.0) < 0.5 || abs(vpid - 5.0) < 0.5)) lp = vec3(0.0);   // no lantern before Ritual
+  if (vpid > 5.5) {   // role tools: forager basket, hauler axe, mason mallet
+    float want = abs(vpid - 6.0) < 0.5 ? step(role, 0.5)
+      : abs(vpid - 7.0) < 0.5 ? step(0.5, role) * step(role, 2.5)
+      : abs(vpid - 8.0) < 0.5 ? step(0.5, role) * step(role, 1.5)
+      : step(1.5, role) * step(role, 2.5);
+    lp *= want * tool;
+  }
   vec3 transformed = lp;
   vec3 cloakC = role < 0.5 ? vec3(0.36, 0.50, 0.24) : role < 1.5 ? vec3(0.62, 0.46, 0.26) : role < 2.5 ? vec3(0.34, 0.42, 0.58) : vec3(0.50, 0.30, 0.66);
   float hh = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.547);
@@ -2017,7 +2031,10 @@ const GLSL_VILL_POS = /* glsl */`
   if (abs(vpid - 1.0) < 0.5) vc = vec3(0.86, 0.70, 0.56);
   else if (abs(vpid - 2.0) < 0.5) vc = cloakC * 0.7;
   else if (abs(vpid - 3.0) < 0.5) vc = cargoKind < 0.5 ? vec3(0.55, 0.40, 0.22) : cargoKind < 1.5 ? vec3(0.36, 0.22, 0.11) : vec3(0.58, 0.58, 0.62);
-  else if (abs(vpid - 5.0) < 0.5) vc = vec3(0.20, 0.15, 0.10);
+  else if (abs(vpid - 5.0) < 0.5 || abs(vpid - 7.0) < 0.5) vc = vec3(0.20, 0.15, 0.10);
+  else if (abs(vpid - 6.0) < 0.5) vc = vec3(0.66, 0.50, 0.27);
+  else if (abs(vpid - 8.0) < 0.5) vc = vec3(0.56, 0.56, 0.60);
+  else if (abs(vpid - 9.0) < 0.5) vc = vec3(0.46, 0.33, 0.20);
   else if (abs(vpid - 4.0) < 0.5) { vc = vec3(1.0, 0.8, 0.4); vg = vec3(1.0, 0.66, 0.24) * (0.25 + clamp(uNight * 1.4 + lant, 0.0, 2.0) * 1.8); }
   vVCol = lin2(vc);
   vVGlow = vg;
@@ -2481,19 +2498,31 @@ const S = {
   emptyWait: 60, settleGiveUp: 150,
   campClearRadius: 1.0, campClearLevel: 0.15,   // trampled grass around homes before Farming (civ secondTick)
   shelterHousehold: 4, farmCap: 1.5, storeCap: 1.25, spoilRate: 0.005, mysticShare: 0.1,   // 5c unlocks (spec 5)
+  upgradeGap: 60,   // 5d: a camp rebuilds at most one older home to its current stage per minute (spec 6)
 };
 const SOCIETY = Object.freeze(S);
 
-// Home model stage (spec 6): 0 hide shelter, 1 wattle hut, 2 timber cottage (culture archetypes), 3 stone house.
-// A society camp has no know-how yet in 5a, so its homes are hide shelters; the full town shows its cottages.
-// 5b/5d replace this with the highest of Shelter, Woodworking and Stonework known in the home's camp.
-function homeStage(civ, s) { void s; return civ.societyOn === 1 ? 0 : 2; }
+// Home model stage (spec 6): 0 hide shelter, 1 wattle hut, 2 timber cottage, 3 stone house; culture accents from 2.
+// A camp's stage is the highest of Shelter, Woodworking and Stonework it knows; the full town (society off) is stage 2.
+function campStage(civ, c) {
+  if (civ.societyOn === 0) return 2;
+  return knows(civ, c, IDEA_STONE) ? 3 : knows(civ, c, IDEA_WOOD) ? 2 : knows(civ, c, IDEA_SHELTER) ? 1 : 0;
+}
+// a home keeps the stage it was built at until it is rebuilt, revived or upgraded
+function homeStage(civ, s) { return civ.societyOn === 0 ? 2 : civ.sStage[s]; }
+// rebuilt or revived: the home takes its camp's current stage if that is higher
+function restage(civ, s) {
+  const c = civ.sCamp[s];
+  if (civ.societyOn === 0 || c < 0) return;
+  const st = campStage(civ, c);
+  if (st > civ.sStage[s]) civ.sStage[s] = st;
+}
 
 function createSocietyArrays(nV, nS) {
   const f = (n) => new Float32Array(n), i32 = (n) => new Int32Array(n).fill(-1);
   return {
     vAlive: new Uint8Array(nV), vAge: f(nV), vLife: f(nV), vCamp: i32(nV),
-    sCamp: i32(nS),
+    sCamp: i32(nS), sStage: new Uint8Array(nS), cUpgT: f(MAX_CAMPS),
     cActive: new Uint8Array(MAX_CAMPS), cX: f(MAX_CAMPS), cZ: f(MAX_CAMPS), cFood: f(MAX_CAMPS),
     cBirthT: f(MAX_CAMPS), cSplitT: f(MAX_CAMPS), cStarveT: f(MAX_CAMPS), cFounded: f(MAX_CAMPS),
     cPop: new Int32Array(MAX_CAMPS), cHomes: new Int32Array(MAX_CAMPS), cHomeSlot: i32(MAX_CAMPS),
@@ -2576,7 +2605,7 @@ function addHome(world, c, x, z, build) {
   }
   civ.sBuild[s] = build; civ.sRot[s] = world.rng.next() * 6.283;
   civ.sBias[s] = sampleGrid(world.culturalBias, x, z);
-  civ.sCamp[s] = c;
+  civ.sCamp[s] = c; civ.sStage[s] = campStage(civ, c);
   if (civ.cHomeSlot[c] < 0) civ.cHomeSlot[c] = s;
   return s;
 }
@@ -2766,6 +2795,17 @@ function wanderers(world) {
   }
 }
 
+// 5d: one standing home below the camp's stage is torn down and rebuilt at it (lowest slot first; no rng)
+function upgradeHome(civ, c, t) {
+  if (t - civ.cUpgT[c] < S.upgradeGap) return;
+  const st = campStage(civ, c);
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sCamp[s] !== c || !homeHealthy(civ, s) || civ.sBuild[s] < 1 || civ.sStage[s] >= st) continue;
+    civ.sStage[s] = st; civ.sBuild[s] = 0.02; civ.cUpgT[c] = t;
+    return;
+  }
+}
+
 function societyTick(world) {
   const civ = world.civ;
   if (civ.societyOn === 0) return;
@@ -2819,7 +2859,7 @@ function societyTick(world) {
     const want = Math.ceil(civ.cPop[c] / householdOf(civ, c));
     const ruin = civ.cHomes[c] < want && civ.cFood[c] >= S.homeFood ? ownRuin(world, c) : -1;
     if (ruin >= 0) {
-      civ.sDecay[ruin] = 0; civ.sBuild[ruin] = 0.02; civ.sEpoch++;
+      civ.sDecay[ruin] = 0; civ.sBuild[ruin] = 0.02; civ.sEpoch++; civ.sStage[ruin] = campStage(civ, c);
       civ.cFood[c] -= S.homeFood; civ.cHomes[c]++;
     } else if (civ.cHomes[c] < want && civ.cFood[c] >= S.homeFood) {
       for (let k = 0; k < 40; k++) {
@@ -2830,6 +2870,7 @@ function societyTick(world) {
         break;
       }
     }
+    upgradeHome(civ, c, t);
     trySplit(world, c);
   }
   knowhowTick(world, MAX_CAMPS, campCap);
@@ -3348,6 +3389,7 @@ function recordMyth(world, kind, x, z) {
 function reviveStructure(world, s) {
   const civ = world.civ;
   civ.sDecay[s] = 0; civ.sLum[s] = 1; civ.revived++;
+  if (civ.sKind[s] === KIND_DWELLING) restage(civ, s);
   emitEvent(world.events, EV_REVIVE, civ.sX[s], civ.sZ[s], 1);
   if ((civ.mythFlags & 2) === 0) { civ.mythFlags |= 2; recordMyth(world, MYTH_REVIVE, civ.sX[s], civ.sZ[s]); }
 }
@@ -3801,34 +3843,34 @@ function createStructureGeometry() {
   }
   kitBox(b, 0, 0.08, 0.2, 0.11, 0.15, 0.03, 27, yn);
 
-  // --- Pastoral cottage with a windmill (pid 1 wall, 2 thatch, 5 blades, 13 post)
-  kitBox(b, 0, 0.21, 0, 0.44, 0.26, 0.36, 1, yn);
+  // --- Wattle hut, home stage 1 (pid 28 woven wall, 29 thatch cone, 34 door)
+  kitFrustum(b, 0, 0.0, 0, 0.27, 0.25, 0.2, 9, 28, yn);
+  kitPyramid(b, 0, 0.18, 0, 0.34, 0.28, 9, 29, yn, 0.2);
+  kitBox(b, 0, 0.08, 0.255, 0.1, 0.15, 0.03, 34, yn);
+
+  // --- Timber cottage, home stage 2 (pid 30 plank walls, 31 dark frame, 2 thatch roof, 35 door)
+  kitBox(b, 0, 0.21, 0, 0.44, 0.26, 0.36, 30, yn);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) kitBox(b, sx * 0.22, 0.21, sz * 0.18, 0.04, 0.27, 0.04, 31, yn);
+  kitBox(b, 0, 0.33, 0.185, 0.46, 0.035, 0.02, 31, yn);
   kitRoof(b, 0, 0.34, 0, 0.58, 0.2, 0.46, 2, yn);
-  kitBox(b, 0.12, 0.47, -0.08, 0.06, 0.12, 0.06, 1, yn);
+  kitBox(b, 0, 0.16, 0.185, 0.1, 0.16, 0.02, 35, yn);
+
+  // --- Stone house, home stage 3 (pid 32 dressed stone, 33 slate roof, 36 door)
+  kitBox(b, 0, 0.25, 0, 0.5, 0.34, 0.42, 32, yn);
+  kitBox(b, 0, 0.43, 0, 0.53, 0.03, 0.45, 32, yn);
+  kitRoof(b, 0, 0.44, 0, 0.6, 0.22, 0.5, 33, yn);
+  kitBox(b, 0, 0.17, 0.215, 0.11, 0.18, 0.02, 36, yn);
+
+  // --- Culture accents on stages 2-3: Pastoral windmill (pid 5 blades, 13 post), Industrious forge chimney (pid 4),
+  //     Mystical crystal (pid 3)
   kitBox(b, 0.38, 0.22, 0.0, 0.05, 0.28, 0.05, 13, yn);
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * Math.PI * 2;
     kitBox(b, 0.38 + Math.cos(a) * 0.15, 0.40 + Math.sin(a) * 0.15, 0.06, Math.abs(Math.cos(a)) > 0.5 ? 0.3 : 0.05, Math.abs(Math.sin(a)) > 0.5 ? 0.3 : 0.05, 0.012, 5, yn);
   }
-
-  // --- Industrious quarry house (pid 11 basalt blocks, 4 forge chimney, 14 aqueduct arch)
-  kitBox(b, 0, 0.15, 0, 0.5, 0.14, 0.5, 11, yn);
-  kitBox(b, 0, 0.29, 0, 0.38, 0.14, 0.38, 11, yn);
-  kitBox(b, 0, 0.42, 0, 0.24, 0.12, 0.24, 11, yn);
   kitBox(b, 0.14, 0.62, 0.1, 0.07, 0.3, 0.07, 4, yn);
-  kitBox(b, -0.34, 0.2, 0.3, 0.06, 0.24, 0.06, 14, yn);
-  kitBox(b, 0.34, 0.2, 0.3, 0.06, 0.24, 0.06, 14, yn);
-  kitBox(b, 0, 0.34, 0.3, 0.74, 0.06, 0.07, 14, yn);
-
-  // --- Mystical crystal shrine (pid 3 spire, 10 lantern pylons, 15 gilded ring)
-  kitPyramid(b, 0, 0.08, 0, 0.13, 0.9, 4, 3, yn, 0.4);
-  kitPyramid(b, 0.17, 0.08, 0.08, 0.07, 0.45, 4, 3, yn, 0.9);
-  kitPyramid(b, -0.15, 0.08, -0.1, 0.06, 0.38, 4, 3, yn, 0.1);
-  for (const sx of [-1, 1]) {
-    kitBox(b, sx * 0.3, 0.2, 0.28, 0.05, 0.24, 0.05, 10, yn);
-    kitBox(b, sx * 0.3, 0.36, 0.28, 0.08, 0.07, 0.08, 10, yn);
-  }
-  kitFrustum(b, 0, 0.08, 0, 0.3, 0.28, 0.04, 10, 15, yn);
+  kitPyramid(b, -0.34, 0.04, 0.2, 0.07, 0.5, 4, 3, yn, 0.4);
+  kitPyramid(b, -0.24, 0.04, 0.27, 0.04, 0.26, 4, 3, yn, 0.9);
 
   // --- Harmonic monolith (pid 19 plinth, 8 basalt body, 18 gold bands, 17 gold cap)
   kitFrustum(b, 0, 0.0, 0, 0.22, 0.2, 0.1, 8, 19, yn);
@@ -3979,7 +4021,8 @@ const SIZE = {
 function glslF(x) { return Number.isInteger(x) ? x.toFixed(1) : String(x); }
 
 // ---- gl/villagers.js ----
-// Figurine: pid 0 cloak (or hides), 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
+// Figurine: pid 0 cloak (or hides), 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick;
+// role tools in the left hand (5d): 6 basket, 7 tool handle, 8 axe head, 9 mallet head.
 function createVillagerGeometry() {
   const b = kitNew();
   const yn = (y) => y / 0.42;
@@ -3989,6 +4032,10 @@ function createVillagerGeometry() {
   kitBox(b, 0, 0.17, -0.095, 0.11, 0.12, 0.07, 3, yn);
   kitBox(b, 0.115, 0.15, 0.05, 0.012, 0.24, 0.012, 5, yn);
   kitBox(b, 0.115, 0.045, 0.05, 0.05, 0.06, 0.05, 4, yn);
+  kitFrustum(b, -0.12, 0.03, 0.04, 0.032, 0.05, 0.065, 5, 6, yn);
+  kitBox(b, -0.115, 0.15, 0.05, 0.012, 0.24, 0.012, 7, yn);
+  kitBox(b, -0.115, 0.255, 0.075, 0.012, 0.05, 0.05, 8, yn);
+  kitBox(b, -0.115, 0.265, 0.05, 0.045, 0.035, 0.035, 9, yn);
   return kitFinish(b);
 }
 
@@ -4021,12 +4068,11 @@ function createVillagers(caps) {
   const m = new THREE.Matrix4(), nrm = new THREE.Vector3(), nrmS = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3(), pos = new THREE.Vector3();
   const SCALE = SIZE.villager;
   const sa = state.array;
+  const TOOL_IDEA = [IDEA_BASKETS, IDEA_WOOD, IDEA_STONE, IDEA_RITUAL];   // by role: basket, axe, mallet, lantern
 
   // Orient along velocity, pitch into the slope, bob with the walk cycle (spec 4.2 Pool 3).
   mesh.userData.update = function update(world) {
     const civ = world.civ, elev = world.elev;
-    const cloaks = homeStage(civ, -1) >= 2 ? 4 : 0;   // + 4 on the role: cloaks from stage 2, hides before (spec 6)
-    const lanterns = (civ.gates & GATE_RITUAL) !== 0;   // lanterns come with Ritual
     for (let i = 0; i < n; i++) {
       const x = civ.vX[i], z = civ.vZ[i];
       const gxs = (sampleGrid(elev, x + 0.1, z) - sampleGrid(elev, x - 0.1, z)) / 0.2;
@@ -4048,8 +4094,10 @@ function createVillagers(caps) {
       pos.set(x, y, z);
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);
-      const o = i * 4;
-      sa[o] = civ.vRole[i] + cloaks;
+      const o = i * 4, c = civ.vCamp[i], role = civ.vRole[i];
+      // role + 4 for cloaks (camp stage 2+, hides before) + 8 when the camp knows the role's tool idea (spec 6)
+      sa[o] = role + (campStage(civ, c) >= 2 ? 4 : 0) + (campKnows(civ, c, TOOL_IDEA[role]) ? 8 : 0);
+      const lanterns = campKnows(civ, c, IDEA_RITUAL);   // lanterns come with the camp's Ritual
       sa[o + 1] = civ.vCargo[i] + 2 * civ.vCargoKind[i];   // cargo 0..1 + 2 x kind (food / timber / stone)
       sa[o + 2] = ph;
       sa[o + 3] = !lanterns ? -1 : st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;   // -1: no lantern
@@ -5250,6 +5298,8 @@ const CIV_F32 = ['vX', 'vZ', 'vVX', 'vVZ', 'vTX', 'vTZ', 'vCargo', 'vEnergy', 'v
   'kAdopt', 'kUsed', 'kNeed', 'kTrips', 'kFertSec', 'kRichSec', 'kFloodT'];
 const CIV_U8 = ['vRole', 'vState', 'sKind', 'sActive', 'mKind', 'mMotif', 'vAlive', 'cActive', 'kFirst'];
 const CIV_I32 = ['vHome', 'vAux', 'mStruct', 'mAnniv', 'monoStruct', 'vCamp', 'sCamp', 'cPop', 'cHomes', 'cHomeSlot'];
+// 5d additions, optional so a 5c save still loads (its homes then take their camp's current stage)
+const CIV_OPT_U8 = ['sStage'], CIV_OPT_F32 = ['cUpgT'];
 const CIV_NUM = ['nS', 'dwellings', 'nM', 'food', 'masons', 'built', 'bridges', 'revived', 'mythFlags', 'mythClock',
   'nAlive', 'emptyT', 'societyOn', 'gates', 'splits', 'discoveries', 'firstDiscT', 'kRngS'];
 
@@ -5275,6 +5325,8 @@ function serializeWorld(world, extra) {
   for (const k of CIV_F32) out.c[k] = toB64(civ[k]);
   for (const k of CIV_U8) out.c[k] = toB64(civ[k]);
   for (const k of CIV_I32) out.c[k] = toB64(civ[k]);
+  for (const k of CIV_OPT_U8) out.c[k] = toB64(civ[k]);
+  for (const k of CIV_OPT_F32) out.c[k] = toB64(civ[k]);
   for (const k of CIV_NUM) out.n[k] = civ[k];
   return JSON.stringify(out);
 }
@@ -5295,15 +5347,27 @@ function restoreWorld(world, text) {
     for (const k of CIV_F32) { const a = fromB64(data.c[k], Float32Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]); }
     for (const k of CIV_U8) { const a = fromB64(data.c[k], Uint8Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]); }
     for (const k of CIV_I32) { const a = fromB64(data.c[k], Int32Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]); }
+    for (const k of CIV_OPT_U8) {
+      if (data.c[k] === undefined) continue;
+      const a = fromB64(data.c[k], Uint8Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]);
+    }
+    for (const k of CIV_OPT_F32) {
+      if (data.c[k] === undefined) continue;
+      const a = fromB64(data.c[k], Float32Array, civ[k].length); if (!a) return { ok: false }; staged.push([civ[k], a]);
+    }
     for (const k of CIV_NUM) if (typeof data.n[k] !== 'number' || !Number.isFinite(data.n[k])) return { ok: false };
   } catch (e) { return { ok: false }; }
   // sanity: elevations and fertility must be finite and in range before we trust the data
   for (const [target, src] of staged) {
     if (target === world.elev) { for (let i = 0; i < GRID_N; i++) if (!Number.isFinite(src[i]) || src[i] > 10 || src[i] < -10) return { ok: false }; }
+    if (target === civ.sStage) { for (let i = 0; i < src.length; i++) if (src[i] > 3) return { ok: false }; }
     if (target === world.fertility || target === world.biomass || target === civ.kAdopt) { for (let i = 0; i < src.length; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
   }
+  if (data.c.sStage === undefined) civ.sStage.fill(0);
+  if (data.c.cUpgT === undefined) civ.cUpgT.fill(0);
   for (const [target, src] of staged) target.set(src);
   for (const k of CIV_NUM) civ[k] = data.n[k];
+  if (data.c.sStage === undefined) for (let s = 0; s < civ.nS; s++) if (civ.sKind[s] === 0) restage(civ, s);
   world.stats.time = data.time || 0;
   // runtime-only state that is not saved: orders restart, builders go home, unfinished works are considered done
   civ.oState.fill(0); civ.oWorker.fill(-1); civ.oStruct.fill(-1); civ.vJob.fill(-1);
