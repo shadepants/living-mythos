@@ -5,6 +5,7 @@ import { GLSL_STRUCT_PARS, GLSL_STRUCT_NORMAL, GLSL_STRUCT_POS, GLSL_STRUCT_FRAG
 import { kitNew, kitBox, kitFrustum, kitPyramid, kitRoof, kitFinish } from './geomkit.js';
 import { KIND_DWELLING, KIND_MONOLITH, KIND_BRIDGE, KIND_STEPS, KIND_PAVING, KIND_MYTH } from '../sim/civ.js';
 import { TUNING } from '../sim/tuning.js';
+import { homeStage } from '../sim/society.js';
 
 const GLOW_N = 24;
 
@@ -16,6 +17,14 @@ export function createStructureGeometry() {
 
   // --- common plinth
   kitBox(b, 0, 0.04, 0, 0.64, 0.08, 0.64, 0, yn);
+
+  // --- Hide shelter, home stage 0 (pid 25 hides, 26 poles, 27 door flap)
+  kitPyramid(b, 0, 0.0, 0, 0.3, 0.4, 7, 25, yn, 0.2);
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + 0.5;
+    kitBox(b, Math.cos(a) * 0.025, 0.42, Math.sin(a) * 0.025, 0.022, 0.11, 0.022, 26, yn);
+  }
+  kitBox(b, 0, 0.08, 0.2, 0.11, 0.15, 0.03, 27, yn);
 
   // --- Pastoral cottage with a windmill (pid 1 wall, 2 thatch, 5 blades, 13 post)
   kitBox(b, 0, 0.21, 0, 0.44, 0.26, 0.36, 1, yn);
@@ -149,6 +158,7 @@ export function createStructures(caps) {
       const o = i * 4;
       sa[o] = civ.sBias[i]; sa[o + 1] = civ.sBuild[i]; sa[o + 2] = civ.sDecay[i]; sa[o + 3] = civ.sLum[i];
       ka[o] = civ.sKind[i]; ka[o + 1] = civ.sLen[i] > 0 ? civ.sLen[i] : 1; ka[o + 2] = civ.sKind[i] === KIND_MYTH ? civ.sBias[i] : 0;
+      ka[o + 3] = civ.sKind[i] === KIND_DWELLING ? homeStage(civ, i) : 0;
     }
     state.needsUpdate = true; kindAttr.needsUpdate = true;
     mesh.userData.dt = dt;
@@ -166,7 +176,7 @@ export function createStructures(caps) {
       }
       for (let i = 0; i < n && g < GLOW_N; i++) if (civ.sKind[i] === KIND_MYTH) gl[g++].set(civ.sX[i], civ.sZ[i], 0.7, 0.7 * (1 - 0.7 * civ.sDecay[i]));
       for (let i = 0; i < n && g < GLOW_N; i++) {
-        if (civ.sKind[i] === KIND_DWELLING && civ.sBuild[i] >= 1 && civ.sDecay[i] < 0.5) gl[g++].set(civ.sX[i], civ.sZ[i], 0.8, 0.6 + civ.sLum[i]);
+        if (civ.sKind[i] === KIND_DWELLING && civ.sBuild[i] >= 1 && civ.sDecay[i] < 0.5 && homeStage(civ, i) > 0) gl[g++].set(civ.sX[i], civ.sZ[i], 0.8, 0.6 + civ.sLum[i]);   // hide shelters: no hearth glow before Fire
       }
       for (; g < GLOW_N; g++) gl[g].set(0, 0, 1, 0);
     }

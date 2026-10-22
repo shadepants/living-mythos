@@ -5,10 +5,10 @@ import { kitNew, kitBox, kitFrustum, kitPyramid, kitFinish } from './geomkit.js'
 import { sampleGrid } from '../sim/sample.js';
 import { SIZE } from './scale.js';
 import { ST_PROCESSION, ST_GREET, ROLE_MYSTIC } from '../sim/civ.js';
-import { SOCIETY } from '../sim/society.js';
+import { SOCIETY, GATE_RITUAL, homeStage } from '../sim/society.js';
 import { TUNING } from '../sim/tuning.js';
 
-// Cloaked figurine: pid 0 cloak, 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
+// Figurine: pid 0 cloak (or hides), 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
 function createVillagerGeometry() {
   const b = kitNew();
   const yn = (y) => y / 0.42;
@@ -54,6 +54,8 @@ export function createVillagers(caps) {
   // Orient along velocity, pitch into the slope, bob with the walk cycle (spec 4.2 Pool 3).
   mesh.userData.update = function update(world) {
     const civ = world.civ, elev = world.elev;
+    const cloaks = homeStage(civ, -1) >= 2 ? 4 : 0;   // + 4 on the role: cloaks from stage 2, hides before (spec 6)
+    const lanterns = (civ.gates & GATE_RITUAL) !== 0;   // lanterns come with Ritual
     for (let i = 0; i < n; i++) {
       const x = civ.vX[i], z = civ.vZ[i];
       const gxs = (sampleGrid(elev, x + 0.1, z) - sampleGrid(elev, x - 0.1, z)) / 0.2;
@@ -76,8 +78,10 @@ export function createVillagers(caps) {
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);
       const o = i * 4;
-      sa[o] = civ.vRole[i]; sa[o + 1] = civ.vCargo[i] + 2 * civ.vCargoKind[i];   // cargo 0..1 + 2 x kind (food / timber / stone) sa[o + 2] = ph;
-      sa[o + 3] = st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;
+      sa[o] = civ.vRole[i] + cloaks;
+      sa[o + 1] = civ.vCargo[i] + 2 * civ.vCargoKind[i];   // cargo 0..1 + 2 x kind (food / timber / stone)
+      sa[o + 2] = ph;
+      sa[o + 3] = !lanterns ? -1 : st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;   // -1: no lantern
     }
     mesh.instanceMatrix.needsUpdate = true;
     state.needsUpdate = true;

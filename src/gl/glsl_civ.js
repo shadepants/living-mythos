@@ -16,7 +16,8 @@ varying float vShade;
 uniform sampler2D uSimTexC;
 uniform float uNight;
 bool isPid(float pid, float id) { return abs(pid - id) < 0.5; }
-float partVis(float pid, float kind, float wP, float wI, float wM) {
+float partVis(float pid, float kind, float stage, float wP, float wI, float wM) {
+  if (kind < 0.5 && stage < 0.5) return (isPid(pid, 25.0) || isPid(pid, 26.0) || isPid(pid, 27.0)) ? 1.0 : 0.0;   // hide shelter
   if (isPid(pid, 0.0)) return kind < 0.5 ? 1.0 : 0.0;
   if (kind < 0.5) {
     if (isPid(pid, 1.0) || isPid(pid, 2.0) || isPid(pid, 5.0) || isPid(pid, 13.0)) return wP;
@@ -53,6 +54,9 @@ vec3 partColor(float pid, float hv) {
   if (isPid(pid, 16.0)) return lin(vec3(0.50, 0.47, 0.42) * (0.8 + 0.4 * hv));
   if (isPid(pid, 23.0)) return lin(vec3(0.30, 0.29, 0.32) * (0.85 + 0.3 * hv));
   if (isPid(pid, 24.0)) return lin(vec3(0.40, 0.38, 0.38));
+  if (isPid(pid, 25.0)) return lin(vec3(0.60, 0.45, 0.30) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 26.0)) return lin(vec3(0.30, 0.21, 0.13));
+  if (isPid(pid, 27.0)) return lin(vec3(0.17, 0.12, 0.08));
   return lin(vec3(0.18, 0.16, 0.15));
 }
 `;
@@ -76,7 +80,7 @@ export const GLSL_STRUCT_POS = /* glsl */`
   float wI = 1.0 - smoothstep(-0.45, -0.25, bias);
   float wM = smoothstep(0.25, 0.45, bias);
   float wP = clamp(1.0 - wI - wM, 0.0, 1.0);
-  float vis = partVis(pid, kind, wP, wI, wM);
+  float vis = partVis(pid, kind, aKind.w, wP, wI, wM);
   float hv = hash12(sBase.xz * 13.1 + pid);
 
   vec3 lp = position;
@@ -97,7 +101,7 @@ export const GLSL_STRUCT_POS = /* glsl */`
     float ta = hash12(sBase.xz * 7.1) * 6.283;
     vec2 ax = vec2(cos(ta), sin(ta));
     lp.xz += ax * lp.y * decay * 0.35;
-    if (isPid(pid, 2.0) || isPid(pid, 3.0)) { lp.y -= decay * 0.12; lp.xz += ax * decay * 0.1; }
+    if (isPid(pid, 2.0) || isPid(pid, 3.0) || isPid(pid, 25.0)) { lp.y -= decay * 0.12; lp.xz += ax * decay * 0.1; }
     lp += (vec3(hash12(lp.xz * 31.0), hash12(lp.yz * 29.0 + 1.0), hash12(lp.xy * 27.0 + 2.0)) - 0.5) * 0.045 * decay;
   }
 
@@ -205,7 +209,8 @@ vec3 lin2(vec3 c) { return pow(c, vec3(2.2)); }
 `;
 
 export const GLSL_VILL_POS = /* glsl */`
-  float role = aInstanceState.x;
+  float cloaked = step(3.5, aInstanceState.x);   // role + 4: cloaks; plain role: hides (home stage < 2)
+  float role = aInstanceState.x - 4.0 * cloaked;
   float cargoKind = floor(aInstanceState.y * 0.5);   // 0 food, 1 timber, 2 stone
   float cargo = aInstanceState.y - cargoKind * 2.0;
   float phase = aInstanceState.z;
@@ -219,8 +224,12 @@ export const GLSL_VILL_POS = /* glsl */`
     vec3 pivot = vec3(0.0, 0.17, -0.09);
     lp = pivot + (lp - pivot) * clamp(cargo * 1.5, 0.0, 1.0);
   }
+  if (lant < -0.5 && (abs(vpid - 4.0) < 0.5 || abs(vpid - 5.0) < 0.5)) lp = vec3(0.0);   // no lantern before Ritual
   vec3 transformed = lp;
   vec3 cloakC = role < 0.5 ? vec3(0.36, 0.50, 0.24) : role < 1.5 ? vec3(0.62, 0.46, 0.26) : role < 2.5 ? vec3(0.34, 0.42, 0.58) : vec3(0.50, 0.30, 0.66);
+  float hh = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.547);
+  vec3 hideC = mix(vec3(0.46, 0.33, 0.21), vec3(0.66, 0.52, 0.36), hh);   // hides: tan to dark brown per person
+  cloakC = mix(hideC, cloakC, cloaked);
   vec3 vc = cloakC * (0.8 + 0.3 * vyn);
   vec3 vg = vec3(0.0);
   if (abs(vpid - 1.0) < 0.5) vc = vec3(0.86, 0.70, 0.56);

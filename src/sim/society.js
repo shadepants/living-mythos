@@ -21,6 +21,11 @@ const S = {
 };
 export const SOCIETY = Object.freeze(S);
 
+// Home model stage (spec 6): 0 hide shelter, 1 wattle hut, 2 timber cottage (culture archetypes), 3 stone house.
+// A society camp has no know-how yet in 5a, so its homes are hide shelters; the full town shows its cottages.
+// 5b/5d replace this with the highest of Shelter, Woodworking and Stonework known in the home's camp.
+export function homeStage(civ, s) { void s; return civ.societyOn === 1 ? 0 : 2; }
+
 export function createSocietyArrays(nV, nS) {
   const f = (n) => new Float32Array(n), i32 = (n) => new Int32Array(n).fill(-1);
   return {

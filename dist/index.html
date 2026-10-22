@@ -1793,7 +1793,8 @@ varying float vShade;
 uniform sampler2D uSimTexC;
 uniform float uNight;
 bool isPid(float pid, float id) { return abs(pid - id) < 0.5; }
-float partVis(float pid, float kind, float wP, float wI, float wM) {
+float partVis(float pid, float kind, float stage, float wP, float wI, float wM) {
+  if (kind < 0.5 && stage < 0.5) return (isPid(pid, 25.0) || isPid(pid, 26.0) || isPid(pid, 27.0)) ? 1.0 : 0.0;   // hide shelter
   if (isPid(pid, 0.0)) return kind < 0.5 ? 1.0 : 0.0;
   if (kind < 0.5) {
     if (isPid(pid, 1.0) || isPid(pid, 2.0) || isPid(pid, 5.0) || isPid(pid, 13.0)) return wP;
@@ -1830,6 +1831,9 @@ vec3 partColor(float pid, float hv) {
   if (isPid(pid, 16.0)) return lin(vec3(0.50, 0.47, 0.42) * (0.8 + 0.4 * hv));
   if (isPid(pid, 23.0)) return lin(vec3(0.30, 0.29, 0.32) * (0.85 + 0.3 * hv));
   if (isPid(pid, 24.0)) return lin(vec3(0.40, 0.38, 0.38));
+  if (isPid(pid, 25.0)) return lin(vec3(0.60, 0.45, 0.30) * (0.85 + 0.3 * hv));
+  if (isPid(pid, 26.0)) return lin(vec3(0.30, 0.21, 0.13));
+  if (isPid(pid, 27.0)) return lin(vec3(0.17, 0.12, 0.08));
   return lin(vec3(0.18, 0.16, 0.15));
 }
 `;
@@ -1853,7 +1857,7 @@ const GLSL_STRUCT_POS = /* glsl */`
   float wI = 1.0 - smoothstep(-0.45, -0.25, bias);
   float wM = smoothstep(0.25, 0.45, bias);
   float wP = clamp(1.0 - wI - wM, 0.0, 1.0);
-  float vis = partVis(pid, kind, wP, wI, wM);
+  float vis = partVis(pid, kind, aKind.w, wP, wI, wM);
   float hv = hash12(sBase.xz * 13.1 + pid);
 
   vec3 lp = position;
@@ -1874,7 +1878,7 @@ const GLSL_STRUCT_POS = /* glsl */`
     float ta = hash12(sBase.xz * 7.1) * 6.283;
     vec2 ax = vec2(cos(ta), sin(ta));
     lp.xz += ax * lp.y * decay * 0.35;
-    if (isPid(pid, 2.0) || isPid(pid, 3.0)) { lp.y -= decay * 0.12; lp.xz += ax * decay * 0.1; }
+    if (isPid(pid, 2.0) || isPid(pid, 3.0) || isPid(pid, 25.0)) { lp.y -= decay * 0.12; lp.xz += ax * decay * 0.1; }
     lp += (vec3(hash12(lp.xz * 31.0), hash12(lp.yz * 29.0 + 1.0), hash12(lp.xy * 27.0 + 2.0)) - 0.5) * 0.045 * decay;
   }
 
@@ -1982,7 +1986,8 @@ vec3 lin2(vec3 c) { return pow(c, vec3(2.2)); }
 `;
 
 const GLSL_VILL_POS = /* glsl */`
-  float role = aInstanceState.x;
+  float cloaked = step(3.5, aInstanceState.x);   // role + 4: cloaks; plain role: hides (home stage < 2)
+  float role = aInstanceState.x - 4.0 * cloaked;
   float cargoKind = floor(aInstanceState.y * 0.5);   // 0 food, 1 timber, 2 stone
   float cargo = aInstanceState.y - cargoKind * 2.0;
   float phase = aInstanceState.z;
@@ -1996,8 +2001,12 @@ const GLSL_VILL_POS = /* glsl */`
     vec3 pivot = vec3(0.0, 0.17, -0.09);
     lp = pivot + (lp - pivot) * clamp(cargo * 1.5, 0.0, 1.0);
   }
+  if (lant < -0.5 && (abs(vpid - 4.0) < 0.5 || abs(vpid - 5.0) < 0.5)) lp = vec3(0.0);   // no lantern before Ritual
   vec3 transformed = lp;
   vec3 cloakC = role < 0.5 ? vec3(0.36, 0.50, 0.24) : role < 1.5 ? vec3(0.62, 0.46, 0.26) : role < 2.5 ? vec3(0.34, 0.42, 0.58) : vec3(0.50, 0.30, 0.66);
+  float hh = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.547);
+  vec3 hideC = mix(vec3(0.46, 0.33, 0.21), vec3(0.66, 0.52, 0.36), hh);   // hides: tan to dark brown per person
+  cloakC = mix(hideC, cloakC, cloaked);
   vec3 vc = cloakC * (0.8 + 0.3 * vyn);
   vec3 vg = vec3(0.0);
   if (abs(vpid - 1.0) < 0.5) vc = vec3(0.86, 0.70, 0.56);
@@ -2261,6 +2270,11 @@ const S = {
   campClearRadius: 1.0, campClearLevel: 0.15,   // trampled grass around homes before Farming (civ secondTick)
 };
 const SOCIETY = Object.freeze(S);
+
+// Home model stage (spec 6): 0 hide shelter, 1 wattle hut, 2 timber cottage (culture archetypes), 3 stone house.
+// A society camp has no know-how yet in 5a, so its homes are hide shelters; the full town shows its cottages.
+// 5b/5d replace this with the highest of Shelter, Woodworking and Stonework known in the home's camp.
+function homeStage(civ, s) { void s; return civ.societyOn === 1 ? 0 : 2; }
 
 function createSocietyArrays(nV, nS) {
   const f = (n) => new Float32Array(n), i32 = (n) => new Int32Array(n).fill(-1);
@@ -3454,6 +3468,14 @@ function createStructureGeometry() {
   // --- common plinth
   kitBox(b, 0, 0.04, 0, 0.64, 0.08, 0.64, 0, yn);
 
+  // --- Hide shelter, home stage 0 (pid 25 hides, 26 poles, 27 door flap)
+  kitPyramid(b, 0, 0.0, 0, 0.3, 0.4, 7, 25, yn, 0.2);
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + 0.5;
+    kitBox(b, Math.cos(a) * 0.025, 0.42, Math.sin(a) * 0.025, 0.022, 0.11, 0.022, 26, yn);
+  }
+  kitBox(b, 0, 0.08, 0.2, 0.11, 0.15, 0.03, 27, yn);
+
   // --- Pastoral cottage with a windmill (pid 1 wall, 2 thatch, 5 blades, 13 post)
   kitBox(b, 0, 0.21, 0, 0.44, 0.26, 0.36, 1, yn);
   kitRoof(b, 0, 0.34, 0, 0.58, 0.2, 0.46, 2, yn);
@@ -3586,6 +3608,7 @@ function createStructures(caps) {
       const o = i * 4;
       sa[o] = civ.sBias[i]; sa[o + 1] = civ.sBuild[i]; sa[o + 2] = civ.sDecay[i]; sa[o + 3] = civ.sLum[i];
       ka[o] = civ.sKind[i]; ka[o + 1] = civ.sLen[i] > 0 ? civ.sLen[i] : 1; ka[o + 2] = civ.sKind[i] === KIND_MYTH ? civ.sBias[i] : 0;
+      ka[o + 3] = civ.sKind[i] === KIND_DWELLING ? homeStage(civ, i) : 0;
     }
     state.needsUpdate = true; kindAttr.needsUpdate = true;
     mesh.userData.dt = dt;
@@ -3603,7 +3626,7 @@ function createStructures(caps) {
       }
       for (let i = 0; i < n && g < GLOW_N; i++) if (civ.sKind[i] === KIND_MYTH) gl[g++].set(civ.sX[i], civ.sZ[i], 0.7, 0.7 * (1 - 0.7 * civ.sDecay[i]));
       for (let i = 0; i < n && g < GLOW_N; i++) {
-        if (civ.sKind[i] === KIND_DWELLING && civ.sBuild[i] >= 1 && civ.sDecay[i] < 0.5) gl[g++].set(civ.sX[i], civ.sZ[i], 0.8, 0.6 + civ.sLum[i]);
+        if (civ.sKind[i] === KIND_DWELLING && civ.sBuild[i] >= 1 && civ.sDecay[i] < 0.5 && homeStage(civ, i) > 0) gl[g++].set(civ.sX[i], civ.sZ[i], 0.8, 0.6 + civ.sLum[i]);   // hide shelters: no hearth glow before Fire
       }
       for (; g < GLOW_N; g++) gl[g].set(0, 0, 1, 0);
     }
@@ -3631,7 +3654,7 @@ const SIZE = {
 function glslF(x) { return Number.isInteger(x) ? x.toFixed(1) : String(x); }
 
 // ---- gl/villagers.js ----
-// Cloaked figurine: pid 0 cloak, 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
+// Figurine: pid 0 cloak (or hides), 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
 function createVillagerGeometry() {
   const b = kitNew();
   const yn = (y) => y / 0.42;
@@ -3677,6 +3700,8 @@ function createVillagers(caps) {
   // Orient along velocity, pitch into the slope, bob with the walk cycle (spec 4.2 Pool 3).
   mesh.userData.update = function update(world) {
     const civ = world.civ, elev = world.elev;
+    const cloaks = homeStage(civ, -1) >= 2 ? 4 : 0;   // + 4 on the role: cloaks from stage 2, hides before (spec 6)
+    const lanterns = (civ.gates & GATE_RITUAL) !== 0;   // lanterns come with Ritual
     for (let i = 0; i < n; i++) {
       const x = civ.vX[i], z = civ.vZ[i];
       const gxs = (sampleGrid(elev, x + 0.1, z) - sampleGrid(elev, x - 0.1, z)) / 0.2;
@@ -3699,8 +3724,10 @@ function createVillagers(caps) {
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);
       const o = i * 4;
-      sa[o] = civ.vRole[i]; sa[o + 1] = civ.vCargo[i] + 2 * civ.vCargoKind[i];   // cargo 0..1 + 2 x kind (food / timber / stone) sa[o + 2] = ph;
-      sa[o + 3] = st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;
+      sa[o] = civ.vRole[i] + cloaks;
+      sa[o + 1] = civ.vCargo[i] + 2 * civ.vCargoKind[i];   // cargo 0..1 + 2 x kind (food / timber / stone)
+      sa[o + 2] = ph;
+      sa[o + 3] = !lanterns ? -1 : st === ST_PROCESSION ? 1 : civ.vRole[i] === ROLE_MYSTIC ? 0.5 : 0;   // -1: no lantern
     }
     mesh.instanceMatrix.needsUpdate = true;
     state.needsUpdate = true;

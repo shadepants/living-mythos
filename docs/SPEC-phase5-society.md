@@ -144,6 +144,11 @@ Once per second, per camp, a split happens when **all** of these hold:
 - `villagers.js` writes a zero-scale matrix for slots with `vAlive = 0`. The instance count stays 120, so the audit
   contract (5 InstancedMesh, pool caps) is unchanged.
 - Children render at 0.7 scale.
+- Brought forward from section 6 so a primitive camp never shows later-era things (Jordan, 2026-10-22):
+  `homeStage(civ, s)` (society.js) drives the home model. Society homes are stage 0 hide shelters (no plinth, no
+  hearth glow before Fire); the `?town=1` start stays at stage 2 with its culture archetypes. Villagers wear hides
+  below stage 2, and lanterns appear only once Ritual is open. Stages 1 and 3 (wattle hut, stone house) and role tools
+  still come in 5d, once 5b gives camps know-how to compute a stage from.
 
 ## 4. Know-how (5b)
 
