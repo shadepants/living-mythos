@@ -1,7 +1,10 @@
 import { TUNING } from './tuning.js';
 import { GRID_W, GRID_H } from './grid.js';
 import { sampleGrid, worldToGridX, worldToGridZ } from './sample.js';
-import { createKnowhowArrays, clearCamp, splitCarry, knowhowTick } from './knowhow.js';
+import {
+  createKnowhowArrays, clearCamp, splitCarry, knowhowTick, knows, anyKnows,
+  IDEA_SHELTER, IDEA_FARMING, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL, IDEA_STORAGE,
+} from './knowhow.js';
 
 // Phase 5a: the island starts with one family that grows, splits into camps and can die out locally
 // (docs/SPEC-phase5-society.md section 3). Runs once per sim second from civ's secondTick; zero allocation.
@@ -19,6 +22,7 @@ const S = {
   splitGap: 120, splitMin: 3.0, splitMax: 6.0, campSpacing: 2.5,
   emptyWait: 60, settleGiveUp: 150,
   campClearRadius: 1.0, campClearLevel: 0.15,   // trampled grass around homes before Farming (civ secondTick)
+  shelterHousehold: 4, farmCap: 1.5, storeCap: 1.25, spoilRate: 0.005, mysticShare: 0.1,   // 5c unlocks (spec 5)
 };
 export const SOCIETY = Object.freeze(S);
 
@@ -36,7 +40,7 @@ export function createSocietyArrays(nV, nS) {
     cBirthT: f(MAX_CAMPS), cSplitT: f(MAX_CAMPS), cStarveT: f(MAX_CAMPS), cFounded: f(MAX_CAMPS),
     cPop: new Int32Array(MAX_CAMPS), cHomes: new Int32Array(MAX_CAMPS), cHomeSlot: i32(MAX_CAMPS),
     nAlive: 0, emptyT: 0, societyOn: 0, gates: 0, splits: 0,
-    hCount: new Int32Array(nS), cOldest: i32(MAX_CAMPS),   // runtime scratch (recomputed every tick)
+    hCount: new Int32Array(nS), cOldest: i32(MAX_CAMPS), cMyst: new Int32Array(MAX_CAMPS),   // runtime scratch (recomputed every tick)
     ...createKnowhowArrays(),
   };
 }
@@ -171,6 +175,17 @@ export function markTownAlive(civ) {
 
 function homeHealthy(civ, s) { return s >= 0 && civ.sKind[s] === 0 && civ.sDecay[s] < 0.9; }
 
+// a ruined home of camp c standing on dry, fertile ground (worth rebuilding), or -1
+function ownRuin(world, c) {
+  const civ = world.civ;
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sKind[s] !== 0 || civ.sCamp[s] !== c || civ.sDecay[s] < 0.9) continue;
+    const i = campCell(civ.sX[s], civ.sZ[s]);
+    if (world.water[i] < 0.004 && world.fertility[i] >= 0.35) return s;
+  }
+  return -1;
+}
+
 // fewest-member healthy home of camp c (hCount must be current)
 function roomiestHome(civ, c) {
   let best = -1, bn = 1e9;
@@ -183,7 +198,7 @@ function roomiestHome(civ, c) {
 
 function recount(world) {
   const civ = world.civ;
-  civ.cPop.fill(0); civ.cHomes.fill(0); civ.cOldest.fill(-1); civ.hCount.fill(0);
+  civ.cPop.fill(0); civ.cHomes.fill(0); civ.cOldest.fill(-1); civ.hCount.fill(0); civ.cMyst.fill(0);
   for (let s = 0; s < civ.nS; s++) {
     const c = civ.sCamp[s];
     if (c >= 0 && civ.cActive[c] === 1 && homeHealthy(civ, s)) civ.cHomes[c]++;
@@ -195,12 +210,20 @@ function recount(world) {
     const c = civ.vCamp[v];
     if (c < 0) continue;
     civ.cPop[c]++;
+    if (civ.vRole[v] === 3 /* ROLE_MYSTIC */) civ.cMyst[c]++;
     const o = civ.cOldest[c];
     if (o < 0 || civ.vAge[v] > civ.vAge[o]) civ.cOldest[c] = v;
     const h = civ.vHome[v];
     if (homeHealthy(civ, h) && civ.sCamp[h] === c) civ.hCount[h]++;
   }
   civ.nAlive = n;
+  // Mystics need Ritual and stay within a tenth of the camp (5c): a camp that forgot Ritual, shrank or split loses its surplus
+  for (let v = 0; v < civ.nV; v++) {
+    if (civ.vAlive[v] === 0 || civ.vRole[v] !== 3 /* ROLE_MYSTIC */) continue;
+    const c = civ.vCamp[v];
+    if (c >= 0 && knows(civ, c, IDEA_RITUAL) && civ.cMyst[c] <= Math.floor(civ.cPop[c] * S.mysticShare)) continue;
+    civ.vRole[v] = 0; if (c >= 0) civ.cMyst[c]--;
+  }
   // homeless (home ruined, or belongs to another camp): move into the roomiest home of their own camp
   for (let v = 0; v < civ.nV; v++) {
     if (civ.vAlive[v] === 0 || civ.vCamp[v] < 0) continue;
@@ -212,11 +235,16 @@ function recount(world) {
   }
 }
 
-function campCap() { return S.campCapBase; }
+// camp capacity (spec 3.6): Farming x1.5, Storage x1.25
+export function campCap(civ, c) {
+  return Math.floor(S.campCapBase * (knows(civ, c, IDEA_FARMING) ? S.farmCap : 1) * (knows(civ, c, IDEA_STORAGE) ? S.storeCap : 1));
+}
+// people per home: 3, or 4 once the camp knows Shelter (spec 5)
+export function householdOf(civ, c) { return knows(civ, c, IDEA_SHELTER) ? S.shelterHousehold : S.householdSize; }
 
 function trySplit(world, c) {
   const civ = world.civ;
-  if (civ.cPop[c] < campCap() || civ.cHomes[c] < 2 || world.stats.time - civ.cSplitT[c] < S.splitGap) return;
+  if (civ.cPop[c] < campCap(civ, c) || civ.cHomes[c] < 2 || world.stats.time - civ.cSplitT[c] < S.splitGap) return;
   let free = 0; for (let k = 0; k < MAX_CAMPS; k++) if (civ.cActive[k] === 0) free++;
   if (free === 0) return;
   civ.cSplitT[c] = world.stats.time;
@@ -313,10 +341,13 @@ export function societyTick(world) {
       continue;
     }
     civ.cStarveT[c] = 0;
+    // without Storage, food above campCap x 10 spoils (spec 5)
+    const cap = campCap(civ, c);
+    if (civ.cFood[c] > cap * 10 && !knows(civ, c, IDEA_STORAGE)) civ.cFood[c] -= (civ.cFood[c] - cap * 10) * S.spoilRate;
     if (civ.cHomeSlot[c] < 0) continue;   // still on the way
     // births
     // a birth needs room: at most one household beyond the homes it has (keeps cHomes >= ceil(cPop / 3) - 1)
-    if (civ.cFood[c] >= S.birthFood + S.birthReserve * pop && pop < campCap() && pop < (civ.cHomes[c] + 1) * S.householdSize
+    if (civ.cFood[c] >= S.birthFood + S.birthReserve * pop && pop < cap && pop < (civ.cHomes[c] + 1) * householdOf(civ, c)
         && t - civ.cBirthT[c] >= S.birthGap) {
       const a = rng.next() * 6.283;
       const v = spawnVillager(world, c, civ.cX[c] + Math.cos(a) * 0.3, civ.cZ[c] + Math.sin(a) * 0.3, 0);
@@ -325,9 +356,14 @@ export function societyTick(world) {
         const h = roomiestHome(civ, c); civ.vHome[v] = h; if (h >= 0) civ.hCount[h]++;
       }
     }
-    // households: one home per householdSize people
-    const want = Math.ceil(civ.cPop[c] / S.householdSize);
-    if (civ.cHomes[c] < want && civ.cFood[c] >= S.homeFood) {
+    // households: one home per householdSize people. A ruined home of the camp on still-good ground is rebuilt in
+    // place first: the ring around a big camp fills up, and the ruin itself blocks the spot (5c's larger camps hit this)
+    const want = Math.ceil(civ.cPop[c] / householdOf(civ, c));
+    const ruin = civ.cHomes[c] < want && civ.cFood[c] >= S.homeFood ? ownRuin(world, c) : -1;
+    if (ruin >= 0) {
+      civ.sDecay[ruin] = 0; civ.sBuild[ruin] = 0.02; civ.sEpoch++;
+      civ.cFood[c] -= S.homeFood; civ.cHomes[c]++;
+    } else if (civ.cHomes[c] < want && civ.cFood[c] >= S.homeFood) {
       for (let k = 0; k < 40; k++) {
         const a = rng.next() * 6.283, r = 0.9 + rng.next() * 1.1;
         const x = civ.cX[c] + Math.cos(a) * r, z = civ.cZ[c] + Math.sin(a) * r;
@@ -338,5 +374,9 @@ export function societyTick(world) {
     }
     trySplit(world, c);
   }
-  knowhowTick(world, MAX_CAMPS, campCap());
+  knowhowTick(world, MAX_CAMPS, campCap);
+  // island-wide gates (lanterns, monolith and anniversary myths, the order scan): open once any camp knows the idea.
+  // Per-camp rules (who builds, who processes, what a camp fetches) are checked where they apply (spec 5).
+  civ.gates = (anyKnows(civ, IDEA_BRIDGES, MAX_CAMPS) || anyKnows(civ, IDEA_PATHS, MAX_CAMPS) ? GATE_MASON : 0)
+    | (anyKnows(civ, IDEA_RITUAL, MAX_CAMPS) ? GATE_RITUAL : 0) | (anyKnows(civ, IDEA_FARMING, MAX_CAMPS) ? GATE_FARM : 0);
 }

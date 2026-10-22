@@ -295,6 +295,33 @@ Seeds for the multi-seed tests: 1337, 7, 4242 (5a); add 99 and 2026 for 5b and 5
 
 ## Changelog
 
+### v1.2 - 2026-10-22 (5c built)
+- The gating map (section 5) is per camp: `campKnows`/`knows` in `knowhow.js`; `campCap(civ, c)` and
+  `householdOf(civ, c)` in `society.js`. The island-wide `civ.gates` bits are now recomputed each second as "some camp
+  knows it" and only drive island-wide things (lanterns, the monolith and anniversary myths, the order scan's early exit).
+- Interpretations:
+  - Spoilage is 0.5%/s of the food **above** `campCap × 10`.
+  - Farming's "cleared land" is within `homeClearRadius` of one of the camp's own healthy homes.
+  - Fire: rest restores 0.5 energy with Fire and 0.33 without. Baskets: forage 0.5 per visit instead of 0.35.
+  - Haulers fetch timber only if their camp knows Woodworking, and stone only with Stonework.
+  - A work's camp is the nearest settled camp within `supplyRange` that knows its idea (`oCamp`, runtime only).
+    Children never become Masons.
+  - Mystics: at most `floor(cPop / 10)`, enforced at the 1 Hz recount (surplus or Ritual-less Mystics go back to
+    foraging).
+  - Player monoliths still revive nearby ruins without Ritual (a player power, not a villager rite).
+  - Home models by stage stay in 5d; homes remain hide shelters.
+- Anniversary gatherings: only villagers whose camp knows Ritual answer, and each at most once per 120 s. With a myth
+  stone for every first discovery (5b), unlimited calls kept small camps at the stones and they starved (seed 4242 died
+  out twice in 7,200 s).
+- Households stay balanced: a villager who rests at another home of its camp moves in only if that home has room
+  (`hCount < householdOf`). Before, households piled into central homes (13 of 17 in one home on seed 7), and a split
+  then carried off most of the camp and its food with a single shelter.
+- A camp rebuilds its own ruined home in place (if the ground is still dry and fertile) before looking for a new site.
+  The ring around a big camp fills up, and the ruin itself blocks the spot.
+- Open for 5e: with the unlocks, growth is much faster than 5a. All three test seeds reach 120 people by 2,700-4,500 s
+  (target: town scale at ~14,400 s). Food stores grow very large once Storage stops spoilage (~50,000 per camp at
+  7,200 s on seed 1337).
+
 ### v1.1 - 2026-10-22 (5b built)
 - Know-how lives in `src/sim/knowhow.js`, run from `societyTick` once per second. `EV_DISCOVERY` plays three rising
   marimba notes; with `?debug=1` the overlay and console show the latest discovery.

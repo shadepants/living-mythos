@@ -1,11 +1,15 @@
-// Phase 5a/5b acceptance tests: one family grows, splits into camps and can die out; camps discover ideas, pass them on
-// and forget them (docs/SPEC-phase5-society.md 8). Slow (~25 min in PRoot; run it in tmux). Run: node --expose-gc tools/test-society.mjs
+// Phase 5a-5c acceptance tests: one family grows, splits into camps and can die out; camps discover ideas, pass them on
+// and forget them; what a camp can do depends on what it knows (docs/SPEC-phase5-society.md 8). Slow (~30 min in
+// PRoot; run it in tmux). Run: node --expose-gc tools/test-society.mjs
 import { createWorld } from '../src/sim/world.js';
 import { simStep } from '../src/sim/sim.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { seedCivilization, civStep, ROLE_MASON, ROLE_MYSTIC } from '../src/sim/civ.js';
-import { killVillager, MAX_CAMPS } from '../src/sim/society.js';
-import { N_IDEAS, IDEA_NAMES, IDEA_FARMING, IDEA_BRIDGES } from '../src/sim/knowhow.js';
+import { killVillager, MAX_CAMPS, campCap, householdOf } from '../src/sim/society.js';
+import {
+  N_IDEAS, IDEA_NAMES, IDEA_FARMING, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL, IDEA_SHELTER, IDEA_STORAGE, knows,
+} from '../src/sim/knowhow.js';
+import { GRID_W } from '../src/sim/grid.js';
 
 let failed = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
@@ -38,7 +42,7 @@ for (const seed of [1337, 7, 4242]) {
     if (at3600 < 0 && w.stats.time >= 3600) { at3600 = c.nAlive; splits3600 = c.splits; }
     if ((c.nAlive < 1 && c.emptyT === 0) || c.nAlive > 120) range = false;
     for (let k = 0; k < MAX_CAMPS && homes; k++) {
-      if (c.cActive[k] && c.cHomeSlot[k] >= 0 && c.cHomes[k] < Math.ceil(c.cPop[k] / 3) - 1) { homes = false; homesAt = w.stats.time; }
+      if (c.cActive[k] && c.cHomeSlot[k] >= 0 && c.cHomes[k] < Math.ceil(c.cPop[k] / householdOf(c, k)) - 1) { homes = false; homesAt = w.stats.time; }
     }
   }
   check(`growth ${seed}: by 3,600 s at least 12 people and a split`, at3600 >= 12 && splits3600 >= 1, `${at3600} people, ${splits3600} splits`);
@@ -125,7 +129,7 @@ const farmT = { pas: [], ind: [] };
     spread ? `seed ${spread.seed}: ${spread.idea} camp ${spread.from} -> ${spread.to} (${spread.dist.toFixed(1)} units) after ${spread.delay.toFixed(0)} s` : 'never');
 }
 
-// 5b-3: an idea nobody uses (Bridges: no Mason work exists before 5c) takes hold for 900 s, then fades
+// 5b-3: an idea nobody uses (Bridges, with no frustration to open a bridge work) takes hold for 900 s, then fades
 {
   const w = mk(), c = w.civ;
   for (let i = 0; i < 600; i++) simStep(w);
@@ -133,6 +137,7 @@ const farmT = { pas: [], ind: [] };
   for (let b = 0; b < MAX_CAMPS; b++) if (c.cActive[b]) { c.kAdopt[b * N_IDEAS + IDEA_BRIDGES] = 0.6; c.kUsed[b * N_IDEAS + IDEA_BRIDGES] = t0; }
   let peak = 0, at900 = -1;
   while (w.stats.time - t0 < 1300) {
+    w.frustration.fill(0);   // since 5c Bridges opens bridge works (a use); with no frustration none can open
     simStep(w);
     const a = c.kAdopt[IDEA_BRIDGES];
     if (w.stats.time - t0 < 905) peak = Math.max(peak, a);
@@ -163,6 +168,98 @@ for (const seed of SEEDS5B) {
   check('5b character: Farming comes earlier in Pastoral camps than Industrious ones on most seeds', wins >= 3,
     `Pastoral ${farmT.pas.map(fmt).join('/')} vs Industrious ${farmT.ind.map(fmt).join('/')} s (${wins} of 5)`);
 }
+
+// 5c-a: unlocks follow the camp's know-how (forced adoption on a fresh world)
+{
+  const w = mk(), c = w.civ;
+  const set = (idea, a) => { c.kAdopt[idea] = a; c.kUsed[idea] = w.stats.time; };
+  const cap0 = campCap(c, 0), hh0 = householdOf(c, 0);
+  set(IDEA_FARMING, 0.9); const capF = campCap(c, 0);
+  set(IDEA_STORAGE, 0.9); const capFS = campCap(c, 0);
+  set(IDEA_SHELTER, 0.9); const hh1 = householdOf(c, 0);
+  check('5c capacity and households: 12 -> 18 (Farming) -> 22 (+Storage); 3 -> 4 per home with Shelter',
+    cap0 === 12 && capF === 18 && capFS === 22 && hh0 === 3 && hh1 === 4, `cap ${cap0}/${capF}/${capFS}, household ${hh0}/${hh1}`);
+}
+// 5c-b: spoilage without Storage
+{
+  const drop = (store) => {
+    const w = mk(), c = w.civ;
+    for (let i = 0; i < 300; i++) simStep(w);
+    c.kAdopt[IDEA_STORAGE] = store ? 0.95 : 0; c.kUsed[IDEA_STORAGE] = w.stats.time;
+    c.cFood[0] = 2000; c.cBirthT[0] = w.stats.time + 1e6;   // no births or homes muddying the food count
+    const f0 = c.cFood[0], t0 = w.stats.time;
+    while (w.stats.time - t0 < 60) { simStep(w); c.cBirthT[0] = w.stats.time; }
+    return f0 - c.cFood[0];
+  };
+  const without = drop(false), withS = drop(true);
+  check('5c spoilage: above campCap x 10 food spoils without Storage, not with it', without > withS + 100,
+    `60 s loss ${without.toFixed(0)} without vs ${withS.toFixed(0)} with Storage`);
+}
+// 5c-c: Mason works open only near a camp that knows Paths/Bridges, and only its people build them
+{
+  const run = (paths) => {
+    const w = mk(), c = w.civ;
+    for (let i = 0; i < 200; i++) simStep(w);
+    const cx = c.cX[0] + 1.5, cz = c.cZ[0];
+    const t0 = w.stats.time;
+    let opened = -1, mason = true;
+    while (w.stats.time - t0 < 240) {
+      if (paths) { c.kAdopt[IDEA_PATHS] = 0.9; c.kUsed[IDEA_PATHS] = w.stats.time; }
+      for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {   // a trodden, frustrating patch beside the camp
+        const i = (Math.floor((cz + 10) / 20 * GRID_W) + dz) * GRID_W + Math.floor((cx + 10) / 20 * GRID_W) + dx;
+        if (w.mask[i] === 0) { w.frustration[i] = 3; w.compaction[i] = 0.8; }
+      }
+      simStep(w);
+      for (let o = 0; o < c.oState.length; o++) if (c.oState[o] > 0 && opened < 0) opened = o;
+      for (let v = 0; v < c.nV; v++) if (c.vAlive[v] && c.vJob[v] >= 0 && c.vCamp[v] !== c.oCamp[c.vJob[v]]) mason = false;
+    }
+    return { opened, camp: opened >= 0 ? c.oCamp[opened] : -2, mason, gates: c.gates };
+  };
+  const no = run(false), yes = run(true);
+  check('5c works: a frustrating patch opens no Mason work while no camp knows Paths', no.opened < 0, `opened ${no.opened}, gates ${no.gates}`);
+  check('5c works: once the camp knows Paths the patch opens a work owned by that camp, built by its own people',
+    yes.opened >= 0 && yes.camp === 0 && yes.mason, `order ${yes.opened}, camp ${yes.camp}, masons own-camp ${yes.mason}`);
+}
+// 5c-1 and long-run checks: no Mason work before Bridges or Paths is known somewhere; every work opens for a camp that
+// knows its idea; Masons work for their own camp; Mystics only in Ritual camps, at most a tenth of the camp
+let worksAll = 0;
+for (const seed of [1337, 4242, 7]) {
+  const w = mk(seed), c = w.civ;
+  const wasOpen = new Uint8Array(c.oState.length);
+  let early = 0, badOpen = 0, opens = 0, foreign = 0, mystBad = 0, samples = 0, sec = 0, firstWork = -1, maxMyst = 0;
+  while (w.stats.time < 4500) {
+    simStep(w);
+    for (let o = 0; o < c.oState.length; o++) {
+      const open = c.oState[o] > 0;
+      if (open && !wasOpen[o]) {
+        opens++; if (firstWork < 0) firstWork = w.stats.time;
+        const idea = c.oKind[o] === 2 /* KIND_BRIDGE */ ? IDEA_BRIDGES : IDEA_PATHS;
+        if (c.oCamp[o] < 0 || !knows(c, c.oCamp[o], idea)) badOpen++;
+        let any = false; for (let k = 0; k < MAX_CAMPS; k++) if (c.cActive[k] && (knows(c, k, IDEA_BRIDGES) || knows(c, k, IDEA_PATHS))) any = true;
+        if (!any) early++;
+      }
+      wasOpen[o] = open ? 1 : 0;
+    }
+    if (w.stats.time < sec) continue;
+    sec = Math.floor(w.stats.time) + 1; samples++;
+    for (let v = 0; v < c.nV; v++) if (c.vAlive[v] && c.vJob[v] >= 0 && c.vCamp[v] !== c.oCamp[c.vJob[v]]) foreign++;
+    const myst = new Int32Array(MAX_CAMPS);
+    for (let v = 0; v < c.nV; v++) if (c.vAlive[v] && c.vRole[v] === ROLE_MYSTIC && c.vCamp[v] >= 0) myst[c.vCamp[v]]++;
+    let bad = false;
+    for (let k = 0; k < MAX_CAMPS; k++) {
+      maxMyst = Math.max(maxMyst, myst[k]);
+      if (myst[k] > 0 && (!knows(c, k, IDEA_RITUAL) || myst[k] > Math.floor(c.cPop[k] * 0.1))) bad = true;
+    }
+    if (bad) mystBad++;
+  }
+  worksAll += opens;
+  check(`5c gating ${seed}: no Mason work before Bridges/Paths is known; each work opens for a camp that knows its idea`,
+    early === 0 && badOpen === 0, `${opens} works, first at ${firstWork.toFixed(0)} s, early ${early}, wrong camp ${badOpen}`);
+  check(`5c roles ${seed}: Masons build their own camp's works; Mystics only in Ritual camps, <= 10% (>= 98% of seconds)`,
+    foreign === 0 && mystBad <= samples * 0.02, `foreign-camp Mason seconds ${foreign}, Mystic over-limit ${mystBad} of ${samples} s, most in a camp ${maxMyst}`);
+}
+
+check('5c gating: Mason works do appear once the ideas are known (all seeds together)', worksAll > 0, `${worksAll} works`);
 
 if (failed) { console.error(`${failed} society test(s) failed`); process.exit(1); }
 console.log('society tests passed');

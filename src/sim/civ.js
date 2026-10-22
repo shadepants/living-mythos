@@ -7,10 +7,11 @@ import {
 } from './events.js';
 import {
   createSocietyArrays, bindCivHelpers, seedFamily, markTownAlive, societyTick, settleArrive, killVillager,
-  ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, SOCIETY,
+  ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, SOCIETY, MAX_CAMPS, householdOf,
 } from './society.js';
 import {
-  bindKnowHelpers, useIdea, noteForage, noteFlood, IDEA_FIRE, IDEA_SHELTER, IDEA_WOOD, IDEA_STONE, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL,
+  bindKnowHelpers, useIdea, noteForage, noteFlood, knows, IDEA_FIRE, IDEA_SHELTER, IDEA_BASKETS, IDEA_FARMING, IDEA_WOOD, IDEA_STONE,
+  IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL,
 } from './knowhow.js';
 
 // Roles
@@ -40,12 +41,14 @@ export function createCiv() {
     vRole: new Uint8Array(nV), vState: new Uint8Array(nV),
     vHome: new Int32Array(nV).fill(-1), vJob: new Int32Array(nV).fill(-1), vAux: new Int32Array(nV).fill(-1),
     vSupply: new Int32Array(nV).fill(-1), vSupplyT0: f(nV), vCargoKind: new Uint8Array(nV),   // runtime-only (not saved)
+    vGatherT: new Float32Array(nV).fill(-1e9),   // runtime: last anniversary this villager answered
     nS: 0, dwellings: 0, sEpoch: 0,   // sEpoch: bumped when an existing slot moves, so the renderer rewrites its matrices
     sX: f(nS), sZ: f(nS), sRot: f(nS), sBias: f(nS), sBuild: f(nS), sDecay: f(nS), sLum: f(nS), sDirX: f(nS), sDirZ: f(nS), sLen: f(nS),
     sKind: new Uint8Array(nS), sActive: new Uint8Array(nS),
     oX: f(MAX_ORDERS), oZ: f(MAX_ORDERS), oDirX: f(MAX_ORDERS), oDirZ: f(MAX_ORDERS), oLen: f(MAX_ORDERS), oProg: f(MAX_ORDERS), oDust: f(MAX_ORDERS),
     oMat: f(MAX_ORDERS), oSupp: new Uint8Array(MAX_ORDERS),   // delivered loads, haulers on the way
     oKind: new Uint8Array(MAX_ORDERS), oState: new Uint8Array(MAX_ORDERS), oWorker: new Int32Array(MAX_ORDERS).fill(-1), oStruct: new Int32Array(MAX_ORDERS).fill(-1),
+    oCamp: new Int32Array(MAX_ORDERS).fill(-1),   // society: the camp whose know-how opened the work; only its people build it
     food: 0, masons: 0, built: 0, bridges: 0, revived: 0, mythFirstBridge: false,
     monoStruct: new Int32Array(8).fill(-1), monoX: new Float32Array(8), monoZ: new Float32Array(8),
     nM: 0, mX: f(MYTH_MAX), mZ: f(MYTH_MAX), mT0: f(MYTH_MAX), mSeed: f(MYTH_MAX),
@@ -209,9 +212,16 @@ function decide(world, v) {
   civ.vTimer[v] = 0.6 + rng.next() * 1.0;
   const camp = civ.societyOn === 1 ? civ.vCamp[v] : -1;
   const child = civ.vAge[v] < SOCIETY.adultAge;
-  // society roles by need (5a: foragers and haulers only; Masons and Mystics come with their ideas in 5c)
-  if (civ.societyOn === 1 && role !== ROLE_MASON && role !== ROLE_MYSTIC) {
-    role = civ.vRole[v] = child || (camp >= 0 && civ.cFood[camp] < 2 * SOCIETY.birthFood) || v % 3 !== 0 ? ROLE_FORAGER : ROLE_HAULER;
+  // society roles by need; Masons come with a work (assignOrders), Mystics with Ritual, at most a tenth of the camp (5c)
+  if (civ.societyOn === 1 && role !== ROLE_MASON) {
+    const ritual = knows(civ, camp, IDEA_RITUAL);
+    const mystCap = Math.floor(civ.cPop[camp] * SOCIETY.mysticShare);
+    if (role === ROLE_MYSTIC && (!ritual || civ.cMyst[camp] > mystCap)) { role = ROLE_FORAGER; civ.cMyst[camp]--; }   // Ritual lost, or the camp shrank or split
+    if (role !== ROLE_MYSTIC) {
+      if (ritual && !child && civ.cMyst[camp] < mystCap) { role = ROLE_MYSTIC; civ.cMyst[camp]++; }
+      else role = child || (camp >= 0 && civ.cFood[camp] < 2 * SOCIETY.birthFood) || v % 3 !== 0 ? ROLE_FORAGER : ROLE_HAULER;
+    }
+    civ.vRole[v] = role;
   }
 
   // Mason with an assigned job keeps walking to it
@@ -253,8 +263,9 @@ function decide(world, v) {
   // haulers bring timber / stone to open Mason works
   if (role === ROLE_HAULER && c < 0.2 && e > 0.25) {
     const o = orderNeedingMaterial(civ, x, z);
-    if (o >= 0) {
-      const sc = pickSource(world, civ.oX[o], civ.oZ[o], matForKind(civ.oKind[o]), tmp2);
+    const mat = o >= 0 ? matForKind(civ.oKind[o]) : 0;
+    if (o >= 0 && (civ.societyOn === 0 || knows(civ, camp, mat === MAT_TIMBER ? IDEA_WOOD : IDEA_STONE))) {   // timber runs need Woodworking, quarrying Stonework
+      const sc = pickSource(world, civ.oX[o], civ.oZ[o], mat, tmp2);
       if (sc > 0 && 1.05 > bestU) { bestU = 1.05; bestA = ST_FETCH; tx = tmp2[0]; tz = tmp2[1]; supplyO = o; }
     }
   }
@@ -268,7 +279,7 @@ function decide(world, v) {
   }
   // processions to the nearest monolith
   const mono = nearestMonolith(world, x, z);
-  if (mono >= 0 && (civ.gates & GATE_RITUAL) !== 0) {
+  if (mono >= 0 && (civ.societyOn === 1 ? knows(civ, camp, IDEA_RITUAL) : (civ.gates & GATE_RITUAL) !== 0)) {
     const bias = sampleGrid(world.culturalBias, x, z);
     const u = role === ROLE_MYSTIC ? 0.95 : 0.2 + 0.35 * Math.max(0, bias);
     if (u > bestU) {
@@ -298,6 +309,28 @@ function decide(world, v) {
 }
 
 function matForKind(kind) { return kind === KIND_BRIDGE ? MAT_TIMBER : MAT_STONE; }
+
+// within r of a healthy home of camp c (Farming's cleared land)
+function nearCampHome(civ, x, z, c, r) {
+  for (let s = 0; s < civ.nS; s++) {
+    if (civ.sKind[s] !== KIND_DWELLING || civ.sCamp[s] !== c || civ.sDecay[s] > 0.4) continue;
+    const dx = civ.sX[s] - x, dz = civ.sZ[s] - z;
+    if (dx * dx + dz * dz < r * r) return true;
+  }
+  return false;
+}
+
+// society: nearest settled camp within supplyRange of (x, z) that knows the idea a work of this kind needs (-1 none)
+function orderCamp(civ, x, z, kind) {
+  const idea = kind === KIND_BRIDGE ? IDEA_BRIDGES : IDEA_PATHS;
+  let best = -1, bd = TUNING.supplyRange * TUNING.supplyRange;
+  for (let c = 0; c < MAX_CAMPS; c++) {
+    if (civ.cActive[c] === 0 || civ.cHomeSlot[c] < 0 || !knows(civ, c, idea)) continue;
+    const dx = civ.cX[c] - x, dz = civ.cZ[c] - z, d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
+}
 
 // nearest open work (waiting, Mason on the way, or being built) still short of material, within supplyRange
 function orderNeedingMaterial(civ, x, z) {
@@ -391,8 +424,14 @@ function arrive(world, v) {
   const civ = world.civ;
   const st = civ.vState[v];
   if (st === ST_FORAGE) {
-    noteForage(civ, civ.vCamp[v], world.stats.time);
-    civ.vCargo[v] = Math.min(1, civ.vCargo[v] + 0.35);
+    const fc = civ.vCamp[v];
+    noteForage(civ, fc, world.stats.time);
+    let gain = 0.35;
+    if (civ.societyOn === 1) {   // 5c: Baskets carry more; Farming yields more on the camp's cleared land
+      if (knows(civ, fc, IDEA_BASKETS)) gain = 0.5;
+      if (knows(civ, fc, IDEA_FARMING) && nearCampHome(civ, civ.vX[v], civ.vZ[v], fc, TUNING.homeClearRadius)) gain *= 1.5;
+    }
+    civ.vCargo[v] = Math.min(1, civ.vCargo[v] + gain);
     const i = cellOf(civ.vX[v], civ.vZ[v]);
     world.fertility[i] = Math.max(0, world.fertility[i] - 0.01);
     world.biomass[i] = Math.max(0, world.biomass[i] - TUNING.forageClear);
@@ -402,10 +441,19 @@ function arrive(world, v) {
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.15);
   } else if (st === ST_REST) {
     useIdea(civ, civ.vCamp[v], IDEA_FIRE, world.stats.time); useIdea(civ, civ.vCamp[v], IDEA_SHELTER, world.stats.time);
-    civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.5);
+    civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + (civ.societyOn === 1 && !knows(civ, civ.vCamp[v], IDEA_FIRE) ? 0.5 / 1.5 : 0.5));   // Fire: rest restores +50%
     if (civ.vCargoKind[v] === MAT_FOOD && civ.vCargo[v] > 0) { addFood(civ, v, civ.vCargo[v] * 10); civ.vCargo[v] = 0; }   // home anyway: drop off the food
     const d = nearestDwelling(civ, civ.vX[v], civ.vZ[v], true, civ.societyOn === 1 ? civ.vCamp[v] : -1);   // rested at the nearest reachable home of its camp: settle there
-    if (d >= 0 && Math.hypot(civ.sX[d] - civ.vX[v], civ.sZ[d] - civ.vZ[v]) < 0.5) civ.vHome[v] = d;
+    if (d >= 0 && d !== civ.vHome[v] && Math.hypot(civ.sX[d] - civ.vX[v], civ.sZ[d] - civ.vZ[v]) < 0.5) {
+      // society: move in only where there is room, or households pile into the central homes and a split carries off
+      // most of the camp (seen in 5c: 13 of 17 in one home)
+      if (civ.societyOn === 0) civ.vHome[v] = d;
+      else if (civ.hCount[d] < householdOf(civ, civ.vCamp[v])) {
+        const h = civ.vHome[v];
+        if (h >= 0 && civ.hCount[h] > 0) civ.hCount[h]--;
+        civ.vHome[v] = d; civ.hCount[d]++;
+      }
+    }
   } else if (st === ST_MIGRATE) {
     if (civ.vAux[v] >= 0) civ.vHome[v] = civ.vAux[v];
   } else if (st === ST_CONSECRATE) {
@@ -596,14 +644,23 @@ function scanForOrders(world) {
       if (wp > 0.012 || wm > 0.012) half = 0.1 + s * 0.1 + 0.25;
     }
     if (half * 2 > 1.5) return;      // a lake is not something you bridge
-    startOrder(world, free, KIND_BRIDGE, x, z, dirX, dirZ, half * 2 + 0.3);
+    openOrder(world, free, KIND_BRIDGE, x, z, dirX, dirZ, half * 2 + 0.3);
   } else if (slope > TUNING.steepSlope) {
     const l = world.elev[bestI - 1], r = world.elev[bestI + 1], u = world.elev[bestI - GRID_W], d = world.elev[bestI + GRID_W];
     let gxs = r - l, gzs = d - u; const m = Math.sqrt(gxs * gxs + gzs * gzs) || 1;
-    startOrder(world, free, KIND_STEPS, x, z, -gxs / m, -gzs / m, 1.1);
+    openOrder(world, free, KIND_STEPS, x, z, -gxs / m, -gzs / m, 1.1);
   } else if (world.compaction[bestI] > 0.5) {
-    startOrder(world, free, KIND_PAVING, x, z, 1, 0, 0.7);
+    openOrder(world, free, KIND_PAVING, x, z, 1, 0, 0.7);
   }
+}
+
+// society works open only within supplyRange of a camp that knows Bridges (bridges) or Paths (steps, paving) (spec 5)
+function openOrder(world, o, kind, x, z, dirX, dirZ, len) {
+  const civ = world.civ;
+  const c = civ.societyOn === 1 ? orderCamp(civ, x, z, kind) : -1;
+  if (civ.societyOn === 1 && c < 0) return;
+  startOrder(world, o, kind, x, z, dirX, dirZ, len);
+  civ.oCamp[o] = c;
 }
 
 function assignOrders(world) {
@@ -612,13 +669,14 @@ function assignOrders(world) {
     if (civ.oState[o] !== 1) continue;
     let best = -1, bd = 1e9;
     for (let v = 0; v < civ.nV; v++) {
-      if (civ.vAlive[v] === 0 || civ.vRole[v] !== ROLE_MASON || civ.vJob[v] >= 0) continue;
+      if (civ.vAlive[v] === 0 || civ.vRole[v] !== ROLE_MASON || civ.vJob[v] >= 0 || (civ.societyOn === 1 && civ.vCamp[v] !== civ.oCamp[o])) continue;
       const dx = civ.vX[v] - civ.oX[o], dz = civ.vZ[v] - civ.oZ[o], d = dx * dx + dz * dz;
       if (d < bd) { bd = d; best = v; }
     }
     if (best < 0 && civ.masons < TUNING.maxMasons) {
       for (let v = 0; v < civ.nV; v++) {
         if (civ.vAlive[v] === 0 || civ.vRole[v] === ROLE_MASON || civ.vRole[v] === ROLE_MYSTIC || civ.vJob[v] >= 0 || civ.vCargo[v] > 0.3) continue;
+        if (civ.societyOn === 1 && (civ.vCamp[v] !== civ.oCamp[o] || civ.vAge[v] < SOCIETY.adultAge)) continue;   // children never become Masons
         const dx = civ.vX[v] - civ.oX[o], dz = civ.vZ[v] - civ.oZ[o], d = dx * dx + dz * dz;
         if (d < bd) { bd = d; best = v; }
       }
@@ -699,11 +757,12 @@ function secondTick(world) {
   // Farming is known, and before that a smaller patch is trampled to grass (without this, forest grows right up to
   // the doors, since settlements sit on the most fertile ground)
   {
-    const farm = (civ.gates & GATE_FARM) !== 0;
-    const bm = world.biomass, R = farm ? TUNING.homeClearRadius : SOCIETY.campClearRadius, LVL = farm ? TUNING.homeClearLevel : SOCIETY.campClearLevel;
-    const rc = Math.ceil(R / 20 * GRID_W);
+    const bm = world.biomass, townFarm = (civ.gates & GATE_FARM) !== 0;
     for (let s = 0; s < civ.nS; s++) {
       if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] > 0.4) continue;
+      const farm = civ.societyOn === 1 ? knows(civ, civ.sCamp[s], IDEA_FARMING) : townFarm;   // 5c: per camp
+      const R = farm ? TUNING.homeClearRadius : SOCIETY.campClearRadius, LVL = farm ? TUNING.homeClearLevel : SOCIETY.campClearLevel;
+      const rc = Math.ceil(R / 20 * GRID_W);
       const gx = Math.round((civ.sX[s] + 10) / 20 * GRID_W - 0.5), gz = Math.round((civ.sZ[s] + 10) / 20 * GRID_H - 0.5);
       for (let dz = -rc; dz <= rc; dz++) for (let dx = -rc; dx <= rc; dx++) {
         const x = gx + dx, z = gz + dz;
@@ -763,10 +822,14 @@ function secondTick(world) {
       let called = 0;
       for (let v = 0; v < civ.nV && called < 10; v++) {
         if (civ.vAlive[v] === 0 || civ.vJob[v] >= 0 || civ.vState[v] === ST_BUILD || civ.vState[v] === ST_SETTLE) continue;
+        // 5c: only camps that know Ritual gather, and nobody more than once per ANNIVERSARY. With a stone for every
+        // discovery (5b), unlimited calls kept small camps at the stones instead of foraging, and they starved.
+        if (world.stats.time - civ.vGatherT[v] < ANNIVERSARY || (civ.societyOn === 1 && !knows(civ, civ.vCamp[v], IDEA_RITUAL))) continue;
         const dx = civ.vX[v] - civ.mX[k], dz = civ.vZ[v] - civ.mZ[k];
         if (dx * dx + dz * dz > 6 * 6) continue;
         const a = world.rng.next() * 6.283, r = 0.35 + world.rng.next() * 0.35;
         civ.vState[v] = ST_GATHER; civ.vTX[v] = civ.mX[k] + Math.cos(a) * r; civ.vTZ[v] = civ.mZ[k] + Math.sin(a) * r; civ.vTimer[v] = 99;
+        civ.vGatherT[v] = world.stats.time;
         called++;
       }
     }

@@ -43,6 +43,12 @@ export function createKnowhowArrays() {
 }
 
 export function knows(civ, c, idea) { return c >= 0 && civ.kAdopt[c * N_IDEAS + idea] >= K.known; }
+// 5c gating: the full town (society off) has every idea; a society camp needs to know it
+export function campKnows(civ, c, idea) { return civ.societyOn === 0 || knows(civ, c, idea); }
+export function anyKnows(civ, idea, maxCamps) {
+  for (let c = 0; c < maxCamps; c++) if (civ.cActive[c] === 1 && civ.kAdopt[c * N_IDEAS + idea] >= K.known) return true;
+  return false;
+}
 
 // the action an idea enables just happened in camp c: it stays fresh (spec 4.5)
 export function useIdea(civ, c, idea, t) { if (c >= 0) civ.kUsed[c * N_IDEAS + idea] = t; }
@@ -148,7 +154,7 @@ function discover(world, c, idea) {
 }
 
 // once per sim second, after society's recount (cPop current)
-export function knowhowTick(world, maxCamps, campCap) {
+export function knowhowTick(world, maxCamps, capOf) {
   const civ = world.civ, t = world.stats.time;
   const tripDecay = 1 - 1 / K.tripWindow, fertDecay = 1 - 1 / K.fertileSec, richDecay = 1 - 1 / K.richWindow;
   // per-second signals from what villagers are doing
@@ -175,7 +181,7 @@ export function knowhowTick(world, maxCamps, campCap) {
   for (let c = 0; c < maxCamps; c++) {
     if (civ.cActive[c] === 0 || civ.cHomeSlot[c] < 0) continue;   // settling parties discover nothing until they arrive
     const i0 = c * N_IDEAS, pop = civ.cPop[c];
-    if (civ.cFood[c] > campCap * 10) { civ.kRichSec[c] += 1; useIdea(civ, c, IDEA_STORAGE, t); }
+    if (civ.cFood[c] > capOf(civ, c) * 10) { civ.kRichSec[c] += 1; useIdea(civ, c, IDEA_STORAGE, t); }
     if ((Math.floor(t) + c) % K.envEvery === 0) refreshEnv(world, c);
     civ.kNeed[i0 + IDEA_FIRE] = 1;
     if (t - civ.kFloodT[c] < K.floodShelter) civ.kNeed[i0 + IDEA_SHELTER] = 1;
