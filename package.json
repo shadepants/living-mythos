@@ -9,8 +9,9 @@
     "interact": "node tools/test-interact.mjs",
     "heap": "node tools/test-heap.mjs",
     "audio": "node tools/test-audio-render.mjs",
-    "verify": "npm test && npm run check && npm run interact && npm run heap && npm run audio",
-    "check": "node tools/build.mjs && node tools/audit.mjs && node tools/smoke.mjs --query debug=1 --expect 11"
+    "verify": "npm test && npm run check && npm run interact && npm run heap && npm run audio && npm run society",
+    "check": "node tools/build.mjs && node tools/audit.mjs && node tools/smoke.mjs --query debug=1 --expect 11",
+    "society": "node --expose-gc tools/test-society.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "~25.14.0",

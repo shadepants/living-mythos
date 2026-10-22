@@ -20,6 +20,8 @@ await page.setViewport({ width: 900, height: 600, hasTouch: true });
 const errors = [];
 page.on('pageerror', e => { errors.push(e.message); console.log('[pageerror]', e.message); });
 page.on('console', m => { if (m.type() === 'error' && !/CONTEXT_LOST|Context Lost|GPU|context could not be created|Error creating WebGL/i.test(m.text())) { errors.push(m.text()); console.log('[console.error]', m.text()); } });
+let failed = 0;
+const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
 // The headless GPU process is flaky here: retry the navigation until the app actually got a WebGL context.
 async function gotoApp(qs) {
   for (let n = 0; n < 8; n++) {
@@ -28,11 +30,13 @@ async function gotoApp(qs) {
   }
   throw new Error('app never booted');
 }
+// the default start is one family (Phase 5); the subsystem checks below run on the pre-Phase-5 town (?town=1)
 await gotoApp('debug=1&norender=1&fresh=1');
+const fam = await page.evaluate(() => ({ alive: window.__mythos.world.civ.nAlive, dw: window.__mythos.world.civ.dwellings }));
+check('the default start is one family of 5 with one home', fam.alive === 5 && fam.dw === 1, JSON.stringify(fam));
+await gotoApp('debug=1&norender=1&fresh=1&town=1');
 await new Promise(r => setTimeout(r, 500));
 
-let failed = 0;
-const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const ev = (fn, ...a) => page.evaluate(fn, ...a);
 const screenOf = (x, z) => ev((x, z) => { const m = window.__mythos; const w = m.world; const gx = Math.round((x + 10) / 20 * 128 - 0.5), gz = Math.round((z + 10) / 20 * 128 - 0.5); return m.project(x, w.elev[gz * 128 + gx], z); }, x, z);
@@ -184,7 +188,7 @@ check('photo mode finishes and restores the UI', (await ev(() => window.__mythos
 const px = await screenOf(-1.2, 0.8);
 const eBefore = await elevAt(-1.2, 0.8);
 await ev(() => window.__mythos.save());
-await gotoApp('debug=1&norender=1');
+await gotoApp('debug=1&norender=1&town=1');
 check('reload restores the saved island', (await ev(() => window.__mythos.restored.ok)) === true);
 const eAfter = await elevAt(-1.2, 0.8);
 check('the sculpted terrain survives a reload', Math.abs(eAfter - eBefore) < 0.05, `${eBefore.toFixed(3)} -> ${eAfter.toFixed(3)}`);

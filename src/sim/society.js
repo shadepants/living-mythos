@@ -33,7 +33,7 @@ export function createSocietyArrays(nV, nS) {
   };
 }
 
-function cellOf(x, z) {
+function campCell(x, z) {
   let gx = Math.round(worldToGridX(x)), gz = Math.round(worldToGridZ(z));
   if (gx < 0) gx = 0; else if (gx > GRID_W - 1) gx = GRID_W - 1;
   if (gz < 0) gz = 0; else if (gz > GRID_H - 1) gz = GRID_H - 1;
@@ -126,7 +126,7 @@ function findSite(world, x, z, rMin, rMax, n) {
       if (dx * dx + dz * dz < S.campSpacing * S.campSpacing) { near = true; break; }
     }
     if (near) continue;
-    const f = world.fertility[cellOf(sx, sz)];
+    const f = world.fertility[campCell(sx, sz)];
     if (f > best) { best = f; site[0] = sx; site[1] = sz; }
   }
   return best;
@@ -146,7 +146,7 @@ export function seedFamily(world) {
     const age = adult ? 600 + rng.next() * 300 : rng.next() * 300;
     const a = rng.next() * 6.283, r = 0.15 + rng.next() * 0.45;
     let px = fx + Math.cos(a) * r, pz = fz + Math.sin(a) * r;
-    if (world.water[cellOf(px, pz)] > 0.006) { px = fx; pz = fz; }
+    if (world.water[campCell(px, pz)] > 0.006) { px = fx; pz = fz; }
     spawnVillager(world, c, px, pz, age);
   }
 }

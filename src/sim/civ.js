@@ -9,7 +9,6 @@ import {
   createSocietyArrays, bindCivHelpers, seedFamily, markTownAlive, societyTick, settleArrive, killVillager,
   ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, SOCIETY,
 } from './society.js';
-export { ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, GATE_ALL, MAX_CAMPS, killVillager, spawnVillager, SOCIETY } from './society.js';
 
 // Roles
 export const ROLE_FORAGER = 0, ROLE_HAULER = 1, ROLE_MASON = 2, ROLE_MYSTIC = 3;

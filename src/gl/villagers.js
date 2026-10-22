@@ -4,7 +4,8 @@ import { GLSL_VILL_PARS, GLSL_VILL_POS, GLSL_VILL_FRAG_COLOR, GLSL_VILL_FRAG_EMI
 import { kitNew, kitBox, kitFrustum, kitPyramid, kitFinish } from './geomkit.js';
 import { sampleGrid } from '../sim/sample.js';
 import { SIZE } from './scale.js';
-import { ST_PROCESSION, ST_GREET, ROLE_MYSTIC, SOCIETY } from '../sim/civ.js';
+import { ST_PROCESSION, ST_GREET, ROLE_MYSTIC } from '../sim/civ.js';
+import { SOCIETY } from '../sim/society.js';
 import { TUNING } from '../sim/tuning.js';
 
 // Cloaked figurine: pid 0 cloak, 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
