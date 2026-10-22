@@ -1,18 +1,19 @@
 import { GRID_N } from './grid.js';
-import { seedBiomass } from './ecology.js';
+import { ST_SETTLE } from './society.js';
 
 // Save / restore of the living world (spec 1.6). Typed arrays travel as base64; everything else as small JSON.
 export const SAVE_KEY = 'mythos.save.v1';
-const SAVE_VERSION = 2;   // 2: + biomass. v1 saves still load (biomass is re-seeded from fertility)
+const SAVE_VERSION = 3;   // 3: Phase 5 society (camps, ages). Older saves are not converted: a fresh primitive island starts
 
 const WORLD_F32 = ['elev', 'water', 'sediment', 'moisture', 'fertility', 'compaction', 'frustration', 'culturalBias', 'monoliths', 'monoPulse', 'biomass'];
-const ADDED_IN = { biomass: 2 };   // fields missing from older save versions
 const WORLD_U8 = ['engCover'];
 const CIV_F32 = ['vX', 'vZ', 'vVX', 'vVZ', 'vTX', 'vTZ', 'vCargo', 'vEnergy', 'vPhase', 'vTimer', 'vHeading',
-  'sX', 'sZ', 'sRot', 'sBias', 'sBuild', 'sDecay', 'sLum', 'sDirX', 'sDirZ', 'sLen', 'mX', 'mZ', 'mT0', 'mSeed', 'monoX', 'monoZ'];
-const CIV_U8 = ['vRole', 'vState', 'sKind', 'sActive', 'mKind', 'mMotif'];
-const CIV_I32 = ['vHome', 'vAux', 'mStruct', 'mAnniv', 'monoStruct'];
-const CIV_NUM = ['nS', 'dwellings', 'nM', 'food', 'masons', 'built', 'bridges', 'revived', 'mythFlags', 'mythClock'];
+  'sX', 'sZ', 'sRot', 'sBias', 'sBuild', 'sDecay', 'sLum', 'sDirX', 'sDirZ', 'sLen', 'mX', 'mZ', 'mT0', 'mSeed', 'monoX', 'monoZ',
+  'vAge', 'vLife', 'cX', 'cZ', 'cFood', 'cBirthT', 'cSplitT', 'cStarveT', 'cFounded'];
+const CIV_U8 = ['vRole', 'vState', 'sKind', 'sActive', 'mKind', 'mMotif', 'vAlive', 'cActive'];
+const CIV_I32 = ['vHome', 'vAux', 'mStruct', 'mAnniv', 'monoStruct', 'vCamp', 'sCamp', 'cPop', 'cHomes', 'cHomeSlot'];
+const CIV_NUM = ['nS', 'dwellings', 'nM', 'food', 'masons', 'built', 'bridges', 'revived', 'mythFlags', 'mythClock',
+  'nAlive', 'emptyT', 'societyOn', 'gates', 'splits'];
 
 function toB64(arr) {
   const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
@@ -45,12 +46,11 @@ export function restoreWorld(world, text) {
   let data;
   try { data = JSON.parse(text); } catch (e) { return { ok: false }; }
   if (!data || !(data.v >= 1 && data.v <= SAVE_VERSION) || data.seed !== world.seed || !data.w || !data.c || !data.n) return { ok: false };
-  const skipped = [];
+  if (data.v < SAVE_VERSION) return { ok: false, reason: 'old' };   // saved before Phase 5 societies: start primitive
   const civ = world.civ;
   const staged = [];
   try {
     for (const k of WORLD_F32) {
-      if ((ADDED_IN[k] || 1) > data.v) { skipped.push(k); continue; }   // older save: field did not exist yet
       const a = fromB64(data.w[k], Float32Array, world[k].length); if (!a) return { ok: false }; staged.push([world[k], a]);
     }
     for (const k of WORLD_U8) { const a = fromB64(data.w[k], Uint8Array, world[k].length); if (!a) return { ok: false }; staged.push([world[k], a]); }
@@ -65,13 +65,13 @@ export function restoreWorld(world, text) {
     if (target === world.fertility || target === world.biomass) { for (let i = 0; i < GRID_N; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
   }
   for (const [target, src] of staged) target.set(src);
-  if (skipped.includes('biomass')) seedBiomass(world);
   for (const k of CIV_NUM) civ[k] = data.n[k];
   world.stats.time = data.time || 0;
   // runtime-only state that is not saved: orders restart, builders go home, unfinished works are considered done
   civ.oState.fill(0); civ.oWorker.fill(-1); civ.oStruct.fill(-1); civ.vJob.fill(-1);
   civ.oMat.fill(0); civ.oSupp.fill(0); civ.vSupply.fill(-1); civ.vCargoKind.fill(0);   // material runs restart too
-  for (let v = 0; v < civ.nV; v++) { civ.vState[v] = 0; civ.vTimer[v] = Math.random() * 1.5; civ.vVX[v] = 0; civ.vVZ[v] = 0; }
+  // settlers still walking out keep their state (only arrival founds their camp)
+  for (let v = 0; v < civ.nV; v++) { if (civ.vState[v] !== ST_SETTLE) civ.vState[v] = 0; civ.vTimer[v] = Math.random() * 1.5; civ.vVX[v] = 0; civ.vVZ[v] = 0; }
   for (let s = 0; s < civ.nS; s++) if (civ.sKind[s] >= 2 && civ.sKind[s] <= 4 && civ.sBuild[s] < 1) civ.sBuild[s] = 1;
   world.vx.fill(0); world.vz.fill(0);
   world.fluxL.fill(0); world.fluxR.fill(0); world.fluxT.fill(0); world.fluxB.fill(0);

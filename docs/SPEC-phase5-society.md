@@ -2,7 +2,7 @@
 Title: Living Mythos Phase 5: Society from one family
 Type: Tech Spec
 Version: 1.0
-Status: Draft
+Status: Approved
 Owner: Jordan
 Created: 2026-10-22
 Last Updated: 2026-10-22

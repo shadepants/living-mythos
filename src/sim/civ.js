@@ -5,6 +5,11 @@ import { stepHomeField, homeFieldAt, homeFieldNext, HF_INF } from './paths.js';
 import {
   nextEvent, emitEvent, EV_BUILD_DONE, EV_DUST, EV_LANTERN, EV_CHIME, EV_GREET, EV_REVIVE, EV_MYTH,
 } from './events.js';
+import {
+  createSocietyArrays, bindCivHelpers, seedFamily, markTownAlive, societyTick, settleArrive, killVillager,
+  ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, SOCIETY,
+} from './society.js';
+export { ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, GATE_ALL, MAX_CAMPS, killVillager, spawnVillager, SOCIETY } from './society.js';
 
 // Roles
 export const ROLE_FORAGER = 0, ROLE_HAULER = 1, ROLE_MASON = 2, ROLE_MYSTIC = 3;
@@ -44,7 +49,14 @@ export function createCiv() {
     nM: 0, mX: f(MYTH_MAX), mZ: f(MYTH_MAX), mT0: f(MYTH_MAX), mSeed: f(MYTH_MAX),
     mKind: new Uint8Array(MYTH_MAX), mStruct: new Int32Array(MYTH_MAX).fill(-1), mAnniv: new Int32Array(MYTH_MAX), mMotif: new Uint8Array(MYTH_MAX * 4), mythFlags: 0, mythClock: 0,
     orderClock: 0, lastOrderT: -1e9, foundClock: 0, secClock: 0, lanternClock: 0, eventCursor: { i: 0 },
+    ...createSocietyArrays(nV, nS),
   };
+}
+
+// food lands in the villager's camp store (society) or the shared store (old full-town start)
+function addFood(civ, v, amount) {
+  if (civ.societyOn === 1 && civ.vCamp[v] >= 0) civ.cFood[civ.vCamp[v]] += amount;
+  else civ.food += amount;
 }
 
 function cellOf(x, z) {
@@ -73,8 +85,14 @@ function addStructure(civ, kind, x, z, bias, build, dirX, dirZ, len) {
   return s;
 }
 
-// Found the starting dwellings and place the villagers (spec 3.4).
+// Primitive start: one family (Phase 5, docs/SPEC-phase5-society.md).
 export function seedCivilization(world) {
+  world.civ.eventCursor.i = world.events.head;
+  seedFamily(world);
+}
+
+// The pre-Phase-5 start: 14 homes and 120 villagers with every feature open (subsystem tests, ?town=1).
+export function seedTown(world) {
   const civ = world.civ, rng = world.rng;
   civ.eventCursor.i = world.events.head;
   const want = TUNING.startDwellings;
@@ -107,6 +125,7 @@ export function seedCivilization(world) {
     civ.vHeading[v] = rng.next() * 6.283;
     civ.vState[v] = ST_IDLE;
   }
+  markTownAlive(civ);
 }
 
 function siteOk(world, x, z, minD2, minFert) {
@@ -124,10 +143,11 @@ function siteOk(world, x, z, minD2, minFert) {
   return true;
 }
 
-function nearestDwelling(civ, x, z, needHealthy) {
+function nearestDwelling(civ, x, z, needHealthy, camp = -1) {
   let best = -1, bd = 1e9;
   for (let s = 0; s < civ.nS; s++) {
     if (civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1) continue;
+    if (camp >= 0 && civ.sCamp[s] !== camp) continue;
     if (needHealthy && civ.sDecay[s] > 0.5) continue;
     const dx = civ.sX[s] - x, dz = civ.sZ[s] - z, d = dx * dx + dz * dz;
     if (d < bd) { bd = d; best = s; }
@@ -161,7 +181,7 @@ function stepCost(world, x, z) {
 function pickFertile(world, x, z, radius, out) {
   // best of 7 random candidate cells within radius; returns fertility, writes the cell centre to out indices
   const rng = world.rng;
-  let bf = -1, bx = x, bz = z;
+  let bf = -1, bs = -1, bx = x, bz = z;
   for (let k = 0; k < 7; k++) {
     const a = rng.next() * 6.283, r = Math.sqrt(rng.next()) * radius;
     const cx = x + Math.cos(a) * r, cz = z + Math.sin(a) * r;
@@ -169,7 +189,8 @@ function pickFertile(world, x, z, radius, out) {
     const i = cellOf(cx, cz);
     if (world.water[i] > 0.02) continue;
     const f = world.fertility[i] * (1 - world.compaction[i] * 0.5);
-    if (f > bf) { bf = f; bx = cx; bz = cz; }
+    const sc = f * (1 - 0.12 * r);   // near ground wins ties: on evenly fertile land the best spot was a random far one
+    if (sc > bs) { bs = sc; bf = f; bx = cx; bz = cz; }
   }
   out[0] = bx; out[1] = bz;
   return bf;
@@ -179,9 +200,17 @@ const tmp2 = new Float32Array(2);
 
 function decide(world, v) {
   const civ = world.civ, rng = world.rng;
-  const x = civ.vX[v], z = civ.vZ[v], e = civ.vEnergy[v], c = civ.vCargo[v], role = civ.vRole[v];
+  const x = civ.vX[v], z = civ.vZ[v], e = civ.vEnergy[v], c = civ.vCargo[v];
+  let role = civ.vRole[v];
   const home = civ.vHome[v];
+  if (civ.vState[v] === ST_SETTLE) { civ.vTimer[v] = 5; return; }   // walking out to found a camp: only arrival ends it
   civ.vTimer[v] = 0.6 + rng.next() * 1.0;
+  const camp = civ.societyOn === 1 ? civ.vCamp[v] : -1;
+  const child = civ.vAge[v] < SOCIETY.adultAge;
+  // society roles by need (5a: foragers and haulers only; Masons and Mystics come with their ideas in 5c)
+  if (civ.societyOn === 1 && role !== ROLE_MASON && role !== ROLE_MYSTIC) {
+    role = civ.vRole[v] = child || (camp >= 0 && civ.cFood[camp] < 2 * SOCIETY.birthFood) || v % 3 !== 0 ? ROLE_FORAGER : ROLE_HAULER;
+  }
 
   // Mason with an assigned job keeps walking to it
   if (civ.vJob[v] >= 0) { civ.vState[v] = ST_BUILD; civ.vTX[v] = civ.oX[civ.vJob[v]]; civ.vTZ[v] = civ.oZ[civ.vJob[v]]; return; }
@@ -201,14 +230,20 @@ function decide(world, v) {
   }
   // haul cargo home
   if (c > 0.2) {
-    const d = nearestDwelling(civ, x, z, true);
+    const d = nearestDwelling(civ, x, z, true, camp);
     if (d >= 0) { const u = c * (role === ROLE_HAULER ? 1.25 : 1.0); if (u > bestU) { bestU = u; bestA = ST_HAUL; tx = civ.sX[d]; tz = civ.sZ[d]; civ.vAux[v] = d; } }
   }
   // forage fertile ground
   if (c < 0.7 && e > 0.15) {
-    const f = pickFertile(world, x, z, 3.2, tmp2);
+    // keep walking to the spot already chosen (re-picking every decision made foragers dither and rarely arrive)
+    let f;
+    if (civ.vState[v] === ST_FORAGE) {
+      tmp2[0] = civ.vTX[v]; tmp2[1] = civ.vTZ[v];
+      const i = cellOf(tmp2[0], tmp2[1]);
+      f = world.fertility[i] * (1 - world.compaction[i] * 0.5);
+    } else f = pickFertile(world, x, z, 3.2, tmp2);
     if (f > 0.3) {
-      const w = role === ROLE_FORAGER ? 1.0 : role === ROLE_HAULER ? 0.85 : 0.45;
+      const w = (role === ROLE_FORAGER ? 1.0 : role === ROLE_HAULER ? 0.85 : 0.45) * (child ? 0.5 : 1);
       const u = (1 - c) * (0.35 + 0.65 * e) * f * w * 1.1;
       if (u > bestU) { bestU = u; bestA = ST_FORAGE; tx = tmp2[0]; tz = tmp2[1]; }
     }
@@ -225,13 +260,13 @@ function decide(world, v) {
   if (home >= 0) {
     const hf = sampleGrid(world.fertility, civ.sX[home], civ.sZ[home]);
     if (civ.sDecay[home] > 0.5 || hf < TUNING.ruinFertility) {
-      const d = nearestHealthyOther(civ, home);
+      const d = nearestHealthyOther(civ, home, camp);
       if (d >= 0 && 1.0 > bestU) { bestU = 1.0; bestA = ST_MIGRATE; tx = civ.sX[d]; tz = civ.sZ[d]; civ.vAux[v] = d; }
     }
   }
   // processions to the nearest monolith
   const mono = nearestMonolith(world, x, z);
-  if (mono >= 0) {
+  if (mono >= 0 && (civ.gates & GATE_RITUAL) !== 0) {
     const bias = sampleGrid(world.culturalBias, x, z);
     const u = role === ROLE_MYSTIC ? 0.95 : 0.2 + 0.35 * Math.max(0, bias);
     if (u > bestU) {
@@ -255,7 +290,7 @@ function decide(world, v) {
   civ.vState[v] = bestA;
   civ.vTX[v] = tx; civ.vTZ[v] = tz;
   if (bestA === ST_FETCH) {
-    civ.food += c * 10; civ.vCargo[v] = 0;   // drop off any scraps of food first
+    addFood(civ, v, c * 10); civ.vCargo[v] = 0;   // drop off any scraps of food first
     civ.vSupply[v] = supplyO; civ.vSupplyT0[v] = world.stats.time; civ.oSupp[supplyO]++;
   }
 }
@@ -339,10 +374,11 @@ function releaseOrderSuppliers(civ, o) {
   civ.oSupp[o] = 0; civ.oMat[o] = 0;
 }
 
-function nearestHealthyOther(civ, home) {
+function nearestHealthyOther(civ, home, camp) {
   let best = -1, bd = 1e9;
   for (let s = 0; s < civ.nS; s++) {
     if (s === home || civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1 || civ.sDecay[s] > 0.3) continue;
+    if (camp >= 0 && civ.sCamp[s] !== camp) continue;
     const dx = civ.sX[s] - civ.sX[home], dz = civ.sZ[s] - civ.sZ[home], d = dx * dx + dz * dz;
     if (d < bd) { bd = d; best = s; }
   }
@@ -358,18 +394,22 @@ function arrive(world, v) {
     world.fertility[i] = Math.max(0, world.fertility[i] - 0.01);
     world.biomass[i] = Math.max(0, world.biomass[i] - TUNING.forageClear);
   } else if (st === ST_HAUL) {
-    civ.food += civ.vCargo[v] * 10;
+    addFood(civ, v, civ.vCargo[v] * 10);
     civ.vCargo[v] = 0;
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.15);
   } else if (st === ST_REST) {
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.5);
-    const d = nearestDwelling(civ, civ.vX[v], civ.vZ[v], true);   // rested at the nearest reachable home: settle there
+    if (civ.vCargoKind[v] === MAT_FOOD && civ.vCargo[v] > 0) { addFood(civ, v, civ.vCargo[v] * 10); civ.vCargo[v] = 0; }   // home anyway: drop off the food
+    const d = nearestDwelling(civ, civ.vX[v], civ.vZ[v], true, civ.societyOn === 1 ? civ.vCamp[v] : -1);   // rested at the nearest reachable home of its camp: settle there
     if (d >= 0 && Math.hypot(civ.sX[d] - civ.vX[v], civ.sZ[d] - civ.vZ[v]) < 0.5) civ.vHome[v] = d;
   } else if (st === ST_MIGRATE) {
     if (civ.vAux[v] >= 0) civ.vHome[v] = civ.vAux[v];
   } else if (st === ST_CONSECRATE) {
     const s = civ.vAux[v];
     if (s >= 0 && civ.sDecay[s] > 0.4) { reviveStructure(world, s); }
+  } else if (st === ST_SETTLE) {
+    settleArrive(world, v);
+    return;
   } else if (st === ST_GATHER) {
     civ.vTimer[v] = 8;
     civ.vState[v] = ST_IDLE;
@@ -498,6 +538,7 @@ function scanForOrders(world) {
   const civ = world.civ, rng = world.rng;
   let free = -1, open = 0;
   for (let o = 0; o < MAX_ORDERS; o++) { if (civ.oState[o] === 0) { if (free < 0) free = o; } else open++; }
+  if ((civ.gates & GATE_MASON) === 0) return;
   if (free < 0 || open >= TUNING.maxOpenOrders || civ.built >= TUNING.maxWorks || world.stats.time - civ.lastOrderT < TUNING.orderGap) return;
   let bestI = -1, bestF = TUNING.orderThreshold;
   for (let k = 0; k < 140; k++) {
@@ -508,6 +549,7 @@ function scanForOrders(world) {
   }
   for (let k = 0; k < 40; k++) {
     const v = (rng.next() * civ.nV) | 0;
+    if (civ.vAlive[v] === 0) continue;
     const i = cellOf(civ.vX[v], civ.vZ[v]);
     const f = world.frustration[i];
     if (f > bestF && world.engCover[i] === 0 && world.mask[i] === 0) { bestF = f; bestI = i; }
@@ -563,13 +605,13 @@ function assignOrders(world) {
     if (civ.oState[o] !== 1) continue;
     let best = -1, bd = 1e9;
     for (let v = 0; v < civ.nV; v++) {
-      if (civ.vRole[v] !== ROLE_MASON || civ.vJob[v] >= 0) continue;
+      if (civ.vAlive[v] === 0 || civ.vRole[v] !== ROLE_MASON || civ.vJob[v] >= 0) continue;
       const dx = civ.vX[v] - civ.oX[o], dz = civ.vZ[v] - civ.oZ[o], d = dx * dx + dz * dz;
       if (d < bd) { bd = d; best = v; }
     }
     if (best < 0 && civ.masons < TUNING.maxMasons) {
       for (let v = 0; v < civ.nV; v++) {
-        if (civ.vRole[v] === ROLE_MASON || civ.vRole[v] === ROLE_MYSTIC || civ.vJob[v] >= 0 || civ.vCargo[v] > 0.3) continue;
+        if (civ.vAlive[v] === 0 || civ.vRole[v] === ROLE_MASON || civ.vRole[v] === ROLE_MYSTIC || civ.vJob[v] >= 0 || civ.vCargo[v] > 0.3) continue;
         const dx = civ.vX[v] - civ.oX[o], dz = civ.vZ[v] - civ.oZ[o], d = dx * dx + dz * dz;
         if (d < bd) { bd = d; best = v; }
       }
@@ -645,7 +687,7 @@ function secondTick(world) {
   const civ = world.civ;
   // farmers keep the ground around healthy homes open: biomass near a dwelling is pushed back toward crop level
   // (without this, forest grows right up to the doors, since settlements sit on the most fertile ground)
-  {
+  if ((civ.gates & GATE_FARM) !== 0) {
     const bm = world.biomass, R = TUNING.homeClearRadius, LVL = TUNING.homeClearLevel;
     const rc = Math.ceil(R / 20 * GRID_W);
     for (let s = 0; s < civ.nS; s++) {
@@ -665,7 +707,8 @@ function secondTick(world) {
   for (let s = 0; s < civ.nS; s++) {
     if (civ.sKind[s] !== KIND_DWELLING || civ.sBuild[s] < 1) continue;
     const f = sampleGrid(world.fertility, civ.sX[s], civ.sZ[s]);
-    if (f < TUNING.ruinFertility) civ.sDecay[s] = Math.min(1, civ.sDecay[s] + TUNING.ruinRate);
+    const abandoned = civ.societyOn === 1 && (civ.sCamp[s] < 0 || civ.cActive[civ.sCamp[s]] === 0);
+    if (f < TUNING.ruinFertility || abandoned) civ.sDecay[s] = Math.min(1, civ.sDecay[s] + TUNING.ruinRate);
     else if (civ.sDecay[s] < 1 && f > 0.4) civ.sDecay[s] = Math.max(0, civ.sDecay[s] - 0.012);
     civ.sLum[s] = Math.max(0, civ.sLum[s] - 0.05);
     civ.sBias[s] = sampleGrid(world.culturalBias, civ.sX[s], civ.sZ[s]);
@@ -688,7 +731,7 @@ function secondTick(world) {
   }
   for (let k = 0; k < civ.nM; k++) if (civ.mStruct[k] >= 0) civ.sDecay[civ.mStruct[k]] = Math.min(1, (world.stats.time - civ.mT0[k]) / 900);
   // first monolith, floods, and anniversaries at myth stones
-  if ((civ.mythFlags & 4) === 0) {
+  if ((civ.mythFlags & 4) === 0 && (civ.gates & GATE_RITUAL) !== 0) {
     for (let k = 0; k < 8; k++) if (m[k * 4 + 3] !== 0) { civ.mythFlags |= 4; recordMyth(world, MYTH_MONOLITH, m[k * 4], m[k * 4 + 1]); break; }
   }
   for (let s = 0; s < civ.nS; s++) {
@@ -699,14 +742,14 @@ function secondTick(world) {
       recordMyth(world, MYTH_FLOOD, civ.sX[s], civ.sZ[s]);
     }
   }
-  for (let k = 0; k < civ.nM; k++) {
+  for (let k = 0; k < civ.nM && (civ.gates & GATE_RITUAL) !== 0; k++) {
     const n = Math.floor((world.stats.time - civ.mT0[k]) / ANNIVERSARY);
     if (n > civ.mAnniv[k]) {
       civ.mAnniv[k] = n;
       emitEvent(world.events, EV_MYTH, civ.mX[k], civ.mZ[k], 100 + k);
       let called = 0;
       for (let v = 0; v < civ.nV && called < 10; v++) {
-        if (civ.vJob[v] >= 0 || civ.vState[v] === ST_BUILD) continue;
+        if (civ.vAlive[v] === 0 || civ.vJob[v] >= 0 || civ.vState[v] === ST_BUILD || civ.vState[v] === ST_SETTLE) continue;
         const dx = civ.vX[v] - civ.mX[k], dz = civ.vZ[v] - civ.mZ[k];
         if (dx * dx + dz * dz > 6 * 6) continue;
         const a = world.rng.next() * 6.283, r = 0.35 + world.rng.next() * 0.35;
@@ -716,7 +759,7 @@ function secondTick(world) {
     }
   }
   // growth: spend stored food on a new dwelling in fertile ground near the busiest part of the settlement
-  if (civ.food >= TUNING.foodPerDwelling && civ.dwellings < TUNING.dwellingCap) {
+  if (civ.societyOn === 0 && civ.food >= TUNING.foodPerDwelling && civ.dwellings < TUNING.dwellingCap) {
     const rng = world.rng;
     for (let attempt = 0; attempt < 80; attempt++) {
       const base = (rng.next() * civ.nS) | 0;
@@ -733,6 +776,7 @@ function secondTick(world) {
   for (let s = 0; s < civ.nS; s++) {
     if (civ.sKind[s] === KIND_DWELLING && civ.sBuild[s] > 0 && civ.sBuild[s] < 1) civ.sBuild[s] = Math.min(1, civ.sBuild[s] + TUNING.dwellingRise);
   }
+  societyTick(world);
 }
 
 function nudgeBias(world, x, z, radius, target, rate) {
@@ -762,7 +806,7 @@ function readEvents(world) {
     let greeted = 0;
     for (let v = 0; v < civ.nV && greeted < 6; v++) {
       const dx = civ.vX[v] - cx, dz = civ.vZ[v] - cz;
-      if (dx * dx + dz * dz < 2.6 * 2.6 && civ.vJob[v] < 0) {
+      if (dx * dx + dz * dz < 2.6 * 2.6 && civ.vJob[v] < 0 && civ.vAlive[v] === 1 && civ.vState[v] !== ST_SETTLE) {
         civ.vState[v] = ST_GREET; civ.vTimer[v] = 1.6;
         civ.vHeading[v] = Math.atan2(dx * -1, dz * -1);
         greeted++;
@@ -798,6 +842,7 @@ export function civStep(world, dt) {
   stepHomeField(world, slopeAtCell);
   readEvents(world);
   for (let v = 0; v < civ.nV; v++) {
+    if (civ.vAlive[v] === 0) continue;
     civ.vTimer[v] -= dt;
     if (civ.vState[v] === ST_GREET) { if (civ.vTimer[v] <= 0) civ.vState[v] = ST_IDLE; continue; }
     if (civ.vTimer[v] <= 0) decide(world, v);
@@ -819,3 +864,16 @@ export function civStep(world, dt) {
   civ.secClock += dt;
   if (civ.secClock >= 1) { civ.secClock = 0; secondTick(world); }
 }
+
+function addDwelling(world, x, z) { return addStructure(world.civ, KIND_DWELLING, x, z, 0, 0, 0, 1, 0); }
+
+// free a villager from any Mason job or material run (death, or leaving with a household)
+function releaseVillager(world, v) {
+  const civ = world.civ;
+  const o = civ.vJob[v];
+  if (o >= 0) { civ.vJob[v] = -1; if (civ.oWorker[o] === v) civ.oWorker[o] = -1; }
+  if (civ.vSupply[v] >= 0) releaseSupply(civ, v);
+  if (civ.vRole[v] === ROLE_MASON) { civ.masons--; civ.vRole[v] = ROLE_FORAGER; }
+}
+
+bindCivHelpers({ releaseVillager, addDwelling, siteOk });

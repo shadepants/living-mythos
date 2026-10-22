@@ -26,7 +26,7 @@ import { createGridGeometry, createIslandTop, createWaterSurface, createBasaltSk
 import { createWorld } from './sim/world.js';
 import { simStep } from './sim/sim.js';
 import { prewarm } from './sim/prewarm.js';
-import { seedCivilization } from './sim/civ.js';
+import { seedCivilization, seedTown } from './sim/civ.js';
 import { loadFromStorage, saveToStorage, SAVE_KEY } from './sim/persist.js';
 import { createShade, stepShade, computeShadeRows } from './sim/shade.js';
 import { createParticles, stepParticles, breezeLanterns } from './sim/particles.js';
@@ -57,7 +57,7 @@ function boot() {
   try { storage = window.localStorage; if (query.has('fresh')) storage.removeItem(SAVE_KEY); } catch (e) { storage = null; }
   // restore a saved island if there is a valid one for this seed; otherwise pre-warm and found a settlement
   const restored = storage ? loadFromStorage(storage, world) : { ok: false };
-  if (!restored.ok) { prewarm(world); seedCivilization(world); }
+  if (!restored.ok) { prewarm(world); if (query.has('town')) seedTown(world); else seedCivilization(world); }   // ?town=1: the pre-Phase-5 full town
   const particles = createParticles();
   particles.cursor.i = world.events.head;
 
@@ -279,7 +279,8 @@ function boot() {
 
   ctl.setTool(0);
   syncAtmoUi();
-  dock.showHint('Drag to orbit · pinch or scroll to zoom · pick a tool below', 6000);
+  if (restored.reason === 'old') dock.showHint('This island was saved before societies existed; a new one has begun', 7000);
+  else dock.showHint('Drag to orbit · pinch or scroll to zoom · pick a tool below', 6000);
 
   // Timer is core in three r186 (no addon copy ships in r186; see NOTES.md).
   const timer = new THREE.Timer();

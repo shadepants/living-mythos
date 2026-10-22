@@ -4,7 +4,7 @@ import { GLSL_VILL_PARS, GLSL_VILL_POS, GLSL_VILL_FRAG_COLOR, GLSL_VILL_FRAG_EMI
 import { kitNew, kitBox, kitFrustum, kitPyramid, kitFinish } from './geomkit.js';
 import { sampleGrid } from '../sim/sample.js';
 import { SIZE } from './scale.js';
-import { ST_PROCESSION, ST_GREET, ROLE_MYSTIC } from '../sim/civ.js';
+import { ST_PROCESSION, ST_GREET, ROLE_MYSTIC, SOCIETY } from '../sim/civ.js';
 import { TUNING } from '../sim/tuning.js';
 
 // Cloaked figurine: pid 0 cloak, 1 head, 2 hood, 3 cargo bundle, 4 lantern, 5 lantern stick.
@@ -68,8 +68,9 @@ export function createVillagers(caps) {
       fwd.set(Math.sin(h), 0, Math.cos(h));
       fwd.addScaledVector(nrm, -fwd.dot(nrm)).normalize();
       right.crossVectors(nrm, fwd);
-      nrmS.copy(nrm).multiplyScalar(SCALE);
-      m.makeBasis(right.multiplyScalar(SCALE), nrmS, fwd.multiplyScalar(SCALE));
+      const sc = civ.vAlive[i] === 0 ? 0 : civ.vAge[i] < SOCIETY.adultAge ? SCALE * 0.7 : SCALE;   // unused slots vanish, children are smaller
+      nrmS.copy(nrm).multiplyScalar(sc);
+      m.makeBasis(right.multiplyScalar(sc), nrmS, fwd.multiplyScalar(sc));
       pos.set(x, y, z);
       m.setPosition(pos);
       mesh.setMatrixAt(i, m);
