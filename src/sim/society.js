@@ -244,7 +244,7 @@ export function settleArrive(world, v) {
     const hx = civ.vX[v], hz = civ.vZ[v];
     civ.cX[c] = hx; civ.cZ[c] = hz;
     civ.cHomeSlot[c] = -1;
-    addHome(world, c, hx, hz, 0.3);
+    if (addHome(world, c, hx, hz, 0.3) >= 0) civ.cHomes[c]++;   // counted now, not at the next 1 Hz recount
   }
   for (let u = 0; u < civ.nV; u++) {
     if (civ.vAlive[u] === 0 || civ.vCamp[u] !== c || civ.vState[u] !== ST_SETTLE) continue;
@@ -305,7 +305,9 @@ export function societyTick(world) {
     civ.cStarveT[c] = 0;
     if (civ.cHomeSlot[c] < 0) continue;   // still on the way
     // births
-    if (civ.cFood[c] >= S.birthFood + S.birthReserve * pop && pop < campCap() && t - civ.cBirthT[c] >= S.birthGap) {
+    // a birth needs room: at most one household beyond the homes it has (keeps cHomes >= ceil(cPop / 3) - 1)
+    if (civ.cFood[c] >= S.birthFood + S.birthReserve * pop && pop < campCap() && pop < (civ.cHomes[c] + 1) * S.householdSize
+        && t - civ.cBirthT[c] >= S.birthGap) {
       const a = rng.next() * 6.283;
       const v = spawnVillager(world, c, civ.cX[c] + Math.cos(a) * 0.3, civ.cZ[c] + Math.sin(a) * 0.3, 0);
       if (v >= 0) {

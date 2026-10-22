@@ -4,7 +4,7 @@
 import { createWorld } from '../src/sim/world.js';
 import { simStep } from '../src/sim/sim.js';
 import { prewarm } from '../src/sim/prewarm.js';
-import { seedCivilization, ST_FORAGE, KIND_DWELLING } from '../src/sim/civ.js';
+import { seedTown, ST_FORAGE, KIND_DWELLING } from '../src/sim/civ.js';
 import { rainAt, sculptAt, placeMonolith } from '../src/sim/tools.js';
 import { sampleGrid } from '../src/sim/sample.js';
 import { GRID_N, GRID_W } from '../src/sim/grid.js';
@@ -15,7 +15,7 @@ import { emitEvent, EV_BUILD_DONE } from '../src/sim/events.js';
 
 let failed = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
-const mk = (seed = 1337) => { const w = createWorld(seed); prewarm(w); seedCivilization(w); return w; };
+const mk = (seed = 1337) => { const w = createWorld(seed); prewarm(w); seedTown(w); return w; };
 const cellAt = (wx, wz) => Math.round((wz + 10) / 20 * 128 - 0.5) * GRID_W + Math.round((wx + 10) / 20 * 128 - 0.5);
 const patchMean = (a, cx, cz, r) => { let s = 0, n = 0; for (let i = 0; i < GRID_N; i++) { const x = (i % GRID_W + 0.5) / 128 * 20 - 10, z = (((i / GRID_W) | 0) + 0.5) / 128 * 20 - 10; if (Math.hypot(x - cx, z - cz) < r) { s += a[i]; n++; } } return s / n; };
 

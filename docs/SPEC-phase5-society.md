@@ -77,6 +77,8 @@ Each dwelling records its camp in a new `sCamp` Int32[600].
 Once per second, per active camp, a birth happens when **all** of these hold:
 - `cFood ≥ birthFood (40) + 4 × cPop` (tune);
 - `cPop < campCap` (3.6);
+- `cPop < (cHomes + 1) × householdSize`: room for the child, at most one household beyond the camp's homes
+  (keeps test 8.5a-4 true when crowding blocks new homes);
 - `nAlive < 120`, so a free slot exists;
 - at least `birthGap = 45` s since the camp's last birth.
 
@@ -251,7 +253,7 @@ Seeds for the multi-seed tests: 1337, 7, 4242 (5a); add 99 and 2026 for 5b and 5
 2. Determinism: the same seed after 2,000 substeps gives identical `nAlive`, camp count and villager positions.
 3. Growth: on each seed, by 3,600 sim s `nAlive ≥ 12` and at least one split has happened.
 4. Stability: on each seed through 7,200 sim s, `nAlive` stays in [1, 120] except during floor-rule gaps, and
-   `cHomes ≥ ceil(cPop / 3) − 1` for every camp.
+   `cHomes ≥ ceil(cPop / 3) − 1` for every settled camp (a settling party has no home until it arrives).
 5. Starvation: a camp with `cFood = 0` and foraging blocked loses one member per ~60 s, then becomes inactive.
 6. Floor: killing everyone spawns a wandering family of 4 within 60-62 sim s.
 7. Heap test: zero allocation in `civStep` with the society code over 5,000 substeps.

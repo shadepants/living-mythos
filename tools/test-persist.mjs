@@ -22,6 +22,7 @@ const r = restoreWorld(b, text);
 check('restore: a valid save is accepted and returns the extra state', r.ok && r.extra && r.extra.atmo === 0.5);
 check('restore: terrain, soil and culture arrays match exactly', same(a.elev, b.elev) && same(a.fertility, b.fertility) && same(a.culturalBias, b.culturalBias) && same(a.compaction, b.compaction) && same(a.engCover, b.engCover));
 check('restore: villagers, structures, myths and monoliths match', same(a.civ.vX, b.civ.vX) && same(a.civ.sX, b.civ.sX) && same(a.civ.sKind, b.civ.sKind) && same(a.monoliths, b.monoliths) && a.civ.nS === b.civ.nS && a.civ.nM === b.civ.nM && a.stats.time === b.stats.time);
+check('restore: society state (camps, ages, households) matches', ['vAlive', 'vAge', 'vLife', 'vCamp', 'sCamp', 'cActive', 'cPop', 'cHomes', 'cFood', 'cX', 'cZ'].every(k => same(a.civ[k], b.civ[k])) && a.civ.nAlive === b.civ.nAlive && a.civ.societyOn === b.civ.societyOn && a.civ.gates === b.civ.gates && a.civ.splits === b.civ.splits, `alive ${a.civ.nAlive} vs ${b.civ.nAlive}`);
 check('restore: runtime-only state is reset sanely (orders cleared, builders free)', b.civ.oState.every(v => v === 0) && b.civ.vJob.every(v => v === -1) && b.civ.vState.every(v => v === 0));
 for (let i = 0; i < 400; i++) simStep(b);
 let fin = true; for (let i = 0; i < b.elev.length; i++) if (!Number.isFinite(b.elev[i]) || !Number.isFinite(b.water[i])) fin = false;
@@ -32,13 +33,13 @@ const fresh = createWorld(1337);
 const before = Float32Array.from(fresh.elev);
 check('corrupt: garbage JSON is rejected', restoreWorld(fresh, '{not json').ok === false);
 check('corrupt: truncated array data is rejected', restoreWorld(fresh, text.replace(/"elev":"[^"]{40}/, '"elev":"AAAA')).ok === false);
-check('corrupt: wrong version is rejected', restoreWorld(fresh, text.replace('"v":2', '"v":99')).ok === false);
-{ // a version-1 save (before biomass existed) still loads, and its vegetation is re-seeded from fertility
-  const old = JSON.parse(text); old.v = 1; delete old.w.biomass;
-  const wOld = createWorld(1337);
-  const rOld = restoreWorld(wOld, JSON.stringify(old));
-  let bsum = 0; for (let i = 0; i < wOld.biomass.length; i++) bsum += wOld.biomass[i];
-  check('migrate: a v1 save (no biomass) restores and re-seeds vegetation', rOld.ok && same(wOld.elev, a.elev) && bsum > 0, `ok ${rOld.ok}, biomass sum ${bsum.toFixed(1)}`);
+check('corrupt: wrong version is rejected', restoreWorld(fresh, text.replace('"v":3', '"v":99')).ok === false);
+{ // saves from before Phase 5 (v1, v2) are not converted: the caller starts a fresh primitive island
+  for (const v of [1, 2]) {
+    const old = JSON.parse(text); old.v = v;
+    const r0 = restoreWorld(fresh, JSON.stringify(old));
+    check(`old: a v${v} save is declined with reason 'old'`, r0.ok === false && r0.reason === 'old');
+  }
   const wRT = createWorld(1337);   // b has been simulated since its restore, so round-trip into a fresh world
   check('restore: biomass round-trips in a current save', restoreWorld(wRT, text).ok && same(wRT.biomass, a.biomass));
   const bad = JSON.parse(text); const arr = new Float32Array(a.biomass); arr[100] = 5;

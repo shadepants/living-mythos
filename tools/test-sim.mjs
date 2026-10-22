@@ -10,7 +10,7 @@ import { stepHomeField, homeFieldAt, homeFieldNext } from '../src/sim/paths.js';
 import { computeShadeRows, stampObjectShadows } from '../src/sim/shade.js';
 import { createParticles, stepParticles, breezeLanterns, PARTICLE_CAP, P_ROCK, P_LANTERN, P_RAIN, P_SPRAY, P_EMBER } from '../src/sim/particles.js';
 import { emitEvent, EV_ROCKFALL, EV_DUST, EV_LANTERN } from '../src/sim/events.js';
-import { seedCivilization, civStep, slopeAtCell as slopeAtCellT, KIND_STEPS, KIND_BRIDGE, KIND_DWELLING, KIND_MYTH, ROLE_MYSTIC, ST_BUILD, recordMyth, MYTH_FLOOD, MYTH_MAX } from '../src/sim/civ.js';
+import { seedTown, civStep, slopeAtCell as slopeAtCellT, KIND_STEPS, KIND_BRIDGE, KIND_DWELLING, KIND_MYTH, ROLE_MYSTIC, ST_BUILD, recordMyth, MYTH_FLOOD, MYTH_MAX } from '../src/sim/civ.js';
 import { sculptAt, rainAt, placeMonolith, monolithEffects, MAX_MONOLITHS } from '../src/sim/tools.js';
 import { sampleGrid, visualHeight, raymarchHeightfield } from '../src/sim/sample.js';
 import { nextEvent, EV_MONOLITH_PLACE, EV_MONOLITH_PULSE } from '../src/sim/events.js';
@@ -175,7 +175,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   for (let i = 0; i < GRID_N; i++) if (r.mask[i] === 0) later += r.biomass[i];
   check('biomass: seeded after prewarm, then grows during play', seeded / cnt > 0.05 && later > seeded * 1.1, `mean ${(seeded / cnt).toFixed(3)} -> ${(later / cnt).toFixed(3)} after 240 sim s`);
   // households keep their surroundings open: forest planted at a doorstep is pushed back to crop level
-  const h = createWorld(1337); prewarm(h); seedCivilization(h);
+  const h = createWorld(1337); prewarm(h); seedTown(h);
   let d = -1;
   for (let s = 0; s < h.civ.nS; s++) if (h.civ.sKind[s] === KIND_DWELLING && h.civ.sDecay[s] < 0.4) { d = s; break; }
   const cell = Math.round((h.civ.sZ[d] + 10) / 20 * 128 - 0.5) * 128 + Math.round((h.civ.sX[d] + 10) / 20 * 128 - 0.5);
@@ -269,7 +269,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
 
 // 5e. civilization
 {
-  const mk = (seed) => { const w = createWorld(seed); prewarm(w); seedCivilization(w); return w; };
+  const mk = (seed) => { const w = createWorld(seed); prewarm(w); seedTown(w); return w; };
   const w = mk(1337);
   const c = w.civ;
   check('civ: founding dwellings and 120 villagers', c.dwellings >= 8 && c.nV === 120, `${c.dwellings} dwellings`);
@@ -370,7 +370,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
 // 5e0. building materials: haulers fetch timber / stone for Mason works (civStep only, so no water moves and
 // every lowered cell must be a quarry)
 {
-  const setup = () => { const w = createWorld(1337); prewarm(w); seedCivilization(w); return w; };
+  const setup = () => { const w = createWorld(1337); prewarm(w); seedTown(w); return w; };
   const openOrder = (w, kind, x, z) => {
     const c = w.civ; c.oKind[0] = kind; c.oState[0] = 1; c.oX[0] = x; c.oZ[0] = z; c.oDirX[0] = 1; c.oDirZ[0] = 0; c.oLen[0] = 0.8;
     c.oProg[0] = 0; c.oWorker[0] = -1; c.oStruct[0] = -1; c.oDust[0] = 0; c.oMat[0] = 0; c.oSupp[0] = 0;
@@ -419,7 +419,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
 
 // 5e0b. walking: the shared home field (Phase 3)
 {
-  const w = createWorld(1337); prewarm(w); seedCivilization(w);
+  const w = createWorld(1337); prewarm(w); seedTown(w);
   const build = (wd) => { for (let k = 0; k < 2 * 12 * 2; k++) stepHomeField(wd, slopeAtCellT); };   // two full builds
   build(w);
   const pf = w.pathField, c = w.civ;
@@ -440,7 +440,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   }
   check('home field: descending from anywhere reachable ends at a home', tried > 10 && reached === tried, `${reached}/${tried}`);
   // a deep river with one bridged crossing: the descent crosses on the bridge instead of wading
-  const r = createWorld(1337); prewarm(r); seedCivilization(r);
+  const r = createWorld(1337); prewarm(r); seedTown(r);
   for (let i = 0; i < GRID_N; i++) { r.elev[i] = 0.5; r.water[i] = 0; r.engCover[i] = 0; }
   for (let z = 0; z < 128; z++) r.water[z * 128 + 64] = r.water[z * 128 + 65] = 0.2;   // spans the island: no way around
   for (const x of [64, 65]) r.engCover[48 * 128 + x] = 2;   // 8 rows off the straight line: a short detour beats wading
@@ -457,7 +457,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   }
   check('home field: a path across a deep river uses the bridge, not a ford', homeFieldAt(r, x, z) === 0 && waded === 0 && onBridge > 0, `waded ${waded}, on bridge ${onBridge}, reached home ${homeFieldAt(r, x, z) === 0}`);
   // regression on the measured problem: villagers on their way to rest keep making progress
-  const g = createWorld(1337); prewarm(g); seedCivilization(g);
+  const g = createWorld(1337); prewarm(g); seedTown(g);
   for (let s = 0; s < 240 / g.params.dt; s++) simStep(g);
   let trips = 0, stuck = 0; const gc = g.civ;
   for (let round = 0; round < 20; round++) {
@@ -475,7 +475,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
 
 // 5e1. monoliths appear in the structure pool
 {
-  const w = createWorld(1337); prewarm(w); seedCivilization(w);
+  const w = createWorld(1337); prewarm(w); seedTown(w);
   const n0 = w.civ.nS;
   placeMonolith(w, 2, 2);
   for (let i = 0; i < 60; i++) civStep(w, 0.05);
@@ -489,7 +489,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
 
 // 5e2. myths
 {
-  const mk = (seed) => { const w = createWorld(seed); prewarm(w); seedCivilization(w); return w; };
+  const mk = (seed) => { const w = createWorld(seed); prewarm(w); seedTown(w); return w; };
   const w = mk(1337);
   check('myths: none exist at boot', w.civ.nM === 0);
   // first bridge writes a myth and a standing stone
@@ -530,7 +530,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
 
 // 5f. particles
 {
-  const w = createWorld(1337); prewarm(w); seedCivilization(w);
+  const w = createWorld(1337); prewarm(w); seedTown(w);
   const p = createParticles(); p.cursor.i = w.events.head;
   const countType = (t) => { let n = 0; for (let i = 0; i < PARTICLE_CAP; i++) if (p.alive[i] && p.type[i] === t) n++; return n; };
   emitEvent(w.events, EV_ROCKFALL, 0, 0, 1);
@@ -595,7 +595,7 @@ function allFinite(a) { for (let i = 0; i < a.length; i++) if (!Number.isFinite(
   let ok = true; for (let i = 0; i < GRID_N; i++) if (!(w.shade[i] >= 0 && w.shade[i] <= 1)) ok = false;
   check('shade: values stay in [0,1]', ok);
   // a building shades the ground on the side away from the sun, not the sunny side
-  const wb = createWorld(10); prewarm(wb); seedCivilization(wb);
+  const wb = createWorld(10); prewarm(wb); seedTown(wb);
   const sx = wb.civ.sX[0], sz = wb.civ.sZ[0];
   wb.elev.fill(0.3); for (let i = 0; i < GRID_N; i++) if (wb.mask[i]) wb.elev[i] = -0.6;
   const sun = { x: -0.8, y: 0.4, z: 0 };                        // sun toward -x, low

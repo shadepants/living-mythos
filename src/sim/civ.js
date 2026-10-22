@@ -189,7 +189,7 @@ function pickFertile(world, x, z, radius, out) {
     const i = cellOf(cx, cz);
     if (world.water[i] > 0.02) continue;
     const f = world.fertility[i] * (1 - world.compaction[i] * 0.5);
-    const sc = f * (1 - 0.12 * r);   // near ground wins ties: on evenly fertile land the best spot was a random far one
+    const sc = world.civ.societyOn === 1 ? f * (1 - 0.12 * r) : f;   // society start: near ground wins ties (on evenly fertile land the best spot was a random far one)
     if (sc > bs) { bs = sc; bf = f; bx = cx; bz = cz; }
   }
   out[0] = bx; out[1] = bz;
@@ -235,9 +235,9 @@ function decide(world, v) {
   }
   // forage fertile ground
   if (c < 0.7 && e > 0.15) {
-    // keep walking to the spot already chosen (re-picking every decision made foragers dither and rarely arrive)
+    // society start: keep walking to the spot already chosen (re-picking every decision made foragers dither and rarely arrive); the town keeps its tested behaviour
     let f;
-    if (civ.vState[v] === ST_FORAGE) {
+    if (civ.vState[v] === ST_FORAGE && civ.societyOn === 1) {
       tmp2[0] = civ.vTX[v]; tmp2[1] = civ.vTZ[v];
       const i = cellOf(tmp2[0], tmp2[1]);
       f = world.fertility[i] * (1 - world.compaction[i] * 0.5);
