@@ -155,16 +155,36 @@ Anchor kept: dwellings, monoliths, island. Sizes now live in `src/gl/scale.js` (
   seed 1337 the river cut its outlet and drained the central lake. Channels were not clearly better; code removed.
 - Cost unchanged (~0.96 ms per substep in Node). `npm run verify` green.
 
-## Phase 5 — Asset upgrade and realism (Jordan, 2026-10-21; to be planned in detail)
+## Phase 5 — Society from one family (decided with Jordan, 2026-10-21/22)
 
-Jordan wants a more realistic simulation and better-looking assets. Phase 1b fixed proportions only; the models are
-still very low-poly kit shapes (6-blade tufts, octahedron crowns, box cottages, cone villagers).
-- Assets: richer tree models (2-3 species by biome/biomass, layered crowns), crop rows instead of identical tufts on
-  farmland, cottages with doors/windows/varied roofs, villagers with readable silhouettes per role. Budget: the
-  phone holds ~60 fps today; keep vertex counts per pool in check and measure on the device.
-- Realism in the sim: candidates to weigh against Phases 2-4: seasons or day-length effects on growth, livestock /
-  field plots tied to dwellings, tree age and felling for timber (Phase 2), erosion on cleared slopes.
-- Start with a short options list and pick with Jordan before building.
+The island starts primitive: one caveman family that grows, splits into camps and advances mainly by discovery.
+Ideas spread slowly across the map by contact and adoption. The original "asset upgrade and realism" goals are
+folded into 5d.
+
+| Decision | Answer |
+|---|---|
+| Start | One family, caveman style; a restart begins primitive |
+| Advancement | Mostly discovery, some influence from population and time |
+| Spread | Ideas spread by contact and adoption, as a slow wave across the map |
+| Pace | ~2 h real time from family to today's town (~40 homes, 120 people); first discovery within ~5 min |
+| Setbacks | Local: famine or flood shrinks a camp, unused ideas fade. The island can't die out: a wandering family appears if it is empty |
+| Culture | Industrious/Pastoral/Mystical stays as region character; discoveries are a separate know-how layer, biased by character (Pastoral -> farming, Industrious -> stonework, Mystical -> rituals/monoliths) |
+| Monolith | Nearby discovery boost; a discovery made near it becomes a myth |
+| Player tools | Indirect only: land and weather shape needs (carved river -> bridges, drought -> farming). No "give idea" tool |
+| Villager models | Part of this phase (5d) |
+| Old saves | Dropped, not migrated (deliberate exception to ground rule 3): saves below v3 start a fresh primitive world |
+
+Detailed rules: `docs/SPEC-phase5-society.md`.
+
+- **5a** Families, births and deaths, camps splitting (new `src/sim/society.js`; reuse the 120 villager slots, hide
+  unused ones).
+- **5b** Know-how: per-camp ideas, discovery triggers, spread by contact, fading.
+- **5c** Existing features gated behind discoveries (Mason works, timber/stone hauling, building types, paving,
+  bridges), plus myth hooks.
+- **5d** Models by stage: hide shelter -> wattle hut -> timber cottage -> stone house; villagers from hides to role
+  tools. Includes the earlier asset goals (richer trees, crop rows, readable villager silhouettes) within the phone's
+  ~60 fps budget.
+- **5e** Long-run tuning with a timelapse extension of `tools/preview-map.mjs`; tuning runs logged with before/after.
 
 ## Open observations and questions (for later)
 
@@ -187,5 +207,5 @@ Web Worker (sim < 0.5 ms/substep; SAB unavailable here), 256² grid, GPU simulat
 
 ## Order
 
-Phase 0 -> 1 -> 1b -> 2 -> 3 -> 4 (all done), with Phase 5 to be scheduled with Jordan. Phases 1 and 2 share the biomass field; 1b sets sizes before Phase 2 adds
+Phase 0 -> 1 -> 1b -> 2 -> 3 -> 4 (all done), then Phase 5a -> 5b -> 5c -> 5d -> 5e, each checked on the phone. Phases 1 and 2 share the biomass field; 1b sets sizes before Phase 2 adds
 quarries and timber; Phase 3 benefits from Phase 2's extra trips.
