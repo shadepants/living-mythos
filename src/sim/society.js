@@ -17,6 +17,7 @@ const S = {
   householdSize: 3, homeFood: 120, campCapBase: 12,
   splitGap: 120, splitMin: 3.0, splitMax: 6.0, campSpacing: 2.5,
   emptyWait: 60, settleGiveUp: 150,
+  campClearRadius: 1.0, campClearLevel: 0.15,   // trampled grass around homes before Farming (civ secondTick)
 };
 export const SOCIETY = Object.freeze(S);
 

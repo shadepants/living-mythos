@@ -684,10 +684,12 @@ function markCoverFor(world, x, z, dirX, dirZ, len, radius, kind) {
 
 function secondTick(world) {
   const civ = world.civ;
-  // farmers keep the ground around healthy homes open: biomass near a dwelling is pushed back toward crop level
-  // (without this, forest grows right up to the doors, since settlements sit on the most fertile ground)
-  if ((civ.gates & GATE_FARM) !== 0) {
-    const bm = world.biomass, R = TUNING.homeClearRadius, LVL = TUNING.homeClearLevel;
+  // the ground around healthy homes stays open: biomass near a dwelling is pushed back toward crop level once
+  // Farming is known, and before that a smaller patch is trampled to grass (without this, forest grows right up to
+  // the doors, since settlements sit on the most fertile ground)
+  {
+    const farm = (civ.gates & GATE_FARM) !== 0;
+    const bm = world.biomass, R = farm ? TUNING.homeClearRadius : SOCIETY.campClearRadius, LVL = farm ? TUNING.homeClearLevel : SOCIETY.campClearLevel;
     const rc = Math.ceil(R / 20 * GRID_W);
     for (let s = 0; s < civ.nS; s++) {
       if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] > 0.4) continue;

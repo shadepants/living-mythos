@@ -96,6 +96,9 @@ The child spawns at the camp centre, joins the dwelling with the fewest members,
 
 ### 3.6 Households and homes
 
+- Living around a home tramples it open: before Farming, biomass within `campClearRadius = 1.0` of a healthy
+  dwelling is pushed toward grass (`campClearLevel = 0.15`), rising to no limit at the radius. Once Farming is known,
+  today's crop clearing (`homeClearRadius 1.6`, level 0.35) takes over. Without this the forest hides the camp.
 - A camp wants `ceil(cPop / householdSize)` dwellings, with `householdSize = 3`. At 120 people that gives 40 homes,
   which is today's `dwellingCap`.
 - When a camp has fewer dwellings than it wants and `cFood ≥ homeFood (60)` (tune): a new dwelling is placed
