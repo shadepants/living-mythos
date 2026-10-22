@@ -32,6 +32,8 @@ import { createShade, stepShade, computeShadeRows } from './sim/shade.js';
 import { createParticles, stepParticles, breezeLanterns } from './sim/particles.js';
 import { sampleGrid, visualHeight } from './sim/sample.js';
 import { TUNING } from './sim/tuning.js';
+import { nextEvent, EV_DISCOVERY } from './sim/events.js';
+import { IDEA_NAMES, N_IDEAS } from './sim/knowhow.js';
 
 const canvas = document.getElementById('stage');
 const fallback = document.getElementById('fallback');
@@ -269,6 +271,8 @@ function boot() {
   }
   createPhotoButton(uiEl, takePhoto);
   const debugUi = DEBUG ? createDebugOverlay() : null;
+  const discCur = { i: world.events.head };   // debug toast: the latest discovery (Phase 5b)
+  let discText = '';
   const reporter = query.has('report') ? createReporter(renderer, canvas, {
     tier: () => TIER_NAMES[gov.tier], loss: () => lossLog, simTime: () => world.stats.time,
     input: () => ({ ...ctl.st.stats, log: ctl.st.stats.log.slice(-12), camDist: +camera.position.distanceTo(controls.target).toFixed(1), tool: ctl.st.tool, monoliths: world.monoliths.filter((v, i) => i % 4 === 3 && v).length, cursorA: +ctl.st.alpha.toFixed(2) }), villagers: () => world.civ.nV, structures: () => world.civ.nS, particles: () => particles.count,
@@ -358,11 +362,17 @@ function boot() {
     frame++;
     if (debugUi) {
       debugUi.sample(dt, simMs);
+      for (let k = nextEvent(world.events, discCur); k >= 0; k = nextEvent(world.events, discCur)) {
+        if (world.events.type[k] !== EV_DISCOVERY) continue;
+        const a = world.events.a[k];
+        discText = `discovery: camp ${Math.floor(a / N_IDEAS)} found ${IDEA_NAMES[a % N_IDEAS]} at ${world.stats.time.toFixed(0)} s (${world.civ.discoveries} so far)`;
+        console.info('[mythos] ' + discText);
+      }
       debugUi.update(dt, () => {
         let w = 0; for (let i = 0; i < world.water.length; i++) if (!world.mask[i]) w += world.water[i];
         const rock = landSum(world.elev, world.sediment);
         return { tier: TIER_NAMES[gov.tier], water: w, rock, drift: (rock + world.stats.quarried - rock0) / rock0 * 100,   // quarried stone left the ground on purpose
-        villagers: world.civ.nV, structures: world.civ.nS, myths: world.civ.nM, particles: particles.count };
+        villagers: world.civ.nAlive, structures: world.civ.nS, myths: world.civ.nM, particles: particles.count, discovery: discText };
       });
     }
     if (DEBUG && frame === 1) console.info('[mythos] programs compiled:', renderer.info.programs.length);

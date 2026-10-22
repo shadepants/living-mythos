@@ -4,7 +4,7 @@ import { createAudioEngine, VOICES, IR_SECONDS, clampFilterFreq, clampFilterQ, f
 import { SCALES, scaleFor, degreeMidi, degreeFreq, inScale, midiToFreq, rootShift } from '../src/audio/music.js';
 import { createDirector, directorStep } from '../src/audio/director.js';
 import { createWorld } from '../src/sim/world.js';
-import { emitEvent, EV_SCULPT, EV_BUILD_DONE, EV_MONOLITH_PULSE, EV_CHIME, EV_MYTH, EV_ROCKFALL } from '../src/sim/events.js';
+import { emitEvent, EV_SCULPT, EV_BUILD_DONE, EV_MONOLITH_PULSE, EV_CHIME, EV_MYTH, EV_ROCKFALL, EV_DISCOVERY } from '../src/sim/events.js';
 
 let failed = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
@@ -147,6 +147,7 @@ const mkEngine = () => { const ctx = fakeCtx(); const e = createAudioEngine(() =
   check('director: a monolith pulse launches a 4-note bell arpeggio', run(3, () => emitEvent(w.events, EV_MONOLITH_PULSE, 0, 0, 0)) === 4);
   check('director: a myth plays its own 4-note motif', run(4, () => emitEvent(w.events, EV_MYTH, 0, 0, 0)) === 4);
   check('director: an anniversary adds the root-fifth underneath (5 notes)', run(5, () => emitEvent(w.events, EV_MYTH, 0, 0, 100)) === 5);
+  check('director: a discovery plays three rising marimba notes', run(8, () => emitEvent(w.events, EV_DISCOVERY, 0, 0, 3)) === 3);
   check('director: wind chimes ring 2-3 bells', (() => { const n = run(6, () => emitEvent(w.events, EV_CHIME, 0, 0, 1)); return n >= 2 && n <= 3; })());
   run(7, () => emitEvent(w.events, EV_ROCKFALL, 0, 0, 1));
   check('director: rockfall feeds the tectonic rumble level', d.rumble > 0.2);

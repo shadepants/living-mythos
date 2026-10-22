@@ -3,17 +3,18 @@ import { ST_SETTLE } from './society.js';
 
 // Save / restore of the living world (spec 1.6). Typed arrays travel as base64; everything else as small JSON.
 export const SAVE_KEY = 'mythos.save.v1';
-const SAVE_VERSION = 3;   // 3: Phase 5 society (camps, ages). Older saves are not converted: a fresh primitive island starts
+const SAVE_VERSION = 3;   // 3: Phase 5 society (camps, ages, know-how). Older saves are not converted: a fresh primitive island starts
 
 const WORLD_F32 = ['elev', 'water', 'sediment', 'moisture', 'fertility', 'compaction', 'frustration', 'culturalBias', 'monoliths', 'monoPulse', 'biomass'];
 const WORLD_U8 = ['engCover'];
 const CIV_F32 = ['vX', 'vZ', 'vVX', 'vVZ', 'vTX', 'vTZ', 'vCargo', 'vEnergy', 'vPhase', 'vTimer', 'vHeading',
   'sX', 'sZ', 'sRot', 'sBias', 'sBuild', 'sDecay', 'sLum', 'sDirX', 'sDirZ', 'sLen', 'mX', 'mZ', 'mT0', 'mSeed', 'monoX', 'monoZ',
-  'vAge', 'vLife', 'cX', 'cZ', 'cFood', 'cBirthT', 'cSplitT', 'cStarveT', 'cFounded'];
-const CIV_U8 = ['vRole', 'vState', 'sKind', 'sActive', 'mKind', 'mMotif', 'vAlive', 'cActive'];
+  'vAge', 'vLife', 'cX', 'cZ', 'cFood', 'cBirthT', 'cSplitT', 'cStarveT', 'cFounded',
+  'kAdopt', 'kUsed', 'kNeed', 'kTrips', 'kFertSec', 'kRichSec', 'kFloodT'];
+const CIV_U8 = ['vRole', 'vState', 'sKind', 'sActive', 'mKind', 'mMotif', 'vAlive', 'cActive', 'kFirst'];
 const CIV_I32 = ['vHome', 'vAux', 'mStruct', 'mAnniv', 'monoStruct', 'vCamp', 'sCamp', 'cPop', 'cHomes', 'cHomeSlot'];
 const CIV_NUM = ['nS', 'dwellings', 'nM', 'food', 'masons', 'built', 'bridges', 'revived', 'mythFlags', 'mythClock',
-  'nAlive', 'emptyT', 'societyOn', 'gates', 'splits'];
+  'nAlive', 'emptyT', 'societyOn', 'gates', 'splits', 'discoveries', 'firstDiscT', 'kRngS'];
 
 function toB64(arr) {
   const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
@@ -62,7 +63,7 @@ export function restoreWorld(world, text) {
   // sanity: elevations and fertility must be finite and in range before we trust the data
   for (const [target, src] of staged) {
     if (target === world.elev) { for (let i = 0; i < GRID_N; i++) if (!Number.isFinite(src[i]) || src[i] > 10 || src[i] < -10) return { ok: false }; }
-    if (target === world.fertility || target === world.biomass) { for (let i = 0; i < GRID_N; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
+    if (target === world.fertility || target === world.biomass || target === civ.kAdopt) { for (let i = 0; i < src.length; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
   }
   for (const [target, src] of staged) target.set(src);
   for (const k of CIV_NUM) civ[k] = data.n[k];

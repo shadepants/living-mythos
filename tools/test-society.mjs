@@ -1,10 +1,11 @@
-// Phase 5a acceptance tests: one family grows, splits into camps and can die out (docs/SPEC-phase5-society.md 8).
-// Slow (three seeds to 7,200 sim s, a few minutes on the phone). Run: node --expose-gc tools/test-society.mjs
+// Phase 5a/5b acceptance tests: one family grows, splits into camps and can die out; camps discover ideas, pass them on
+// and forget them (docs/SPEC-phase5-society.md 8). Slow (~25 min in PRoot; run it in tmux). Run: node --expose-gc tools/test-society.mjs
 import { createWorld } from '../src/sim/world.js';
 import { simStep } from '../src/sim/sim.js';
 import { prewarm } from '../src/sim/prewarm.js';
 import { seedCivilization, civStep, ROLE_MASON, ROLE_MYSTIC } from '../src/sim/civ.js';
 import { killVillager, MAX_CAMPS } from '../src/sim/society.js';
+import { N_IDEAS, IDEA_NAMES, IDEA_FARMING, IDEA_BRIDGES } from '../src/sim/knowhow.js';
 
 let failed = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
@@ -83,6 +84,85 @@ if (global.gc) {
   const grew = process.memoryUsage().heapUsed - h0;
   check('zero-GC: civStep with the society does not grow the heap over 5,000 substeps', grew < 256 * 1024, `${(grew / 1024).toFixed(1)} KB`);
 } else check('zero-GC: run with --expose-gc', false);
+
+// 5b-1, 5b-2, 5b-4 (Pastoral half): discovery timing and spread by contact on the five 5b seeds
+const SEEDS5B = [1337, 7, 4242, 99, 2026];
+const farmT = { pas: [], ind: [] };
+{
+  const firsts = [];
+  let spread = null;   // {idea, from, to, dist, delay}
+  for (const seed of SEEDS5B) {
+    const w = mk(seed), c = w.civ;
+    const knownT = new Float64Array(N_IDEAS).fill(-1), kX = new Float64Array(N_IDEAS), kZ = new Float64Array(N_IDEAS), kCamp = new Int32Array(N_IDEAS);
+    const lowSince = new Float64Array(MAX_CAMPS * N_IDEAS).fill(-1);   // when this camp was last seen without the idea
+    let farm = -1, sec = 0;
+    while (w.stats.time < 3600 && !(spread && farm >= 0 && c.firstDiscT >= 0)) {
+      simStep(w);
+      if (w.stats.time < sec) continue;
+      sec = Math.floor(w.stats.time) + 1;
+      if (farm < 0 && c.kFirst[IDEA_FARMING]) farm = w.stats.time;
+      for (let b = 0; b < MAX_CAMPS; b++) {
+        if (!c.cActive[b] || c.cHomeSlot[b] < 0) continue;
+        for (let k = 0; k < N_IDEAS; k++) {
+          const a = c.kAdopt[b * N_IDEAS + k];
+          if (a < 0.1) { lowSince[b * N_IDEAS + k] = w.stats.time; continue; }
+          if (a < 0.5) continue;
+          if (knownT[k] < 0) { knownT[k] = w.stats.time; kX[k] = c.cX[b]; kZ[k] = c.cZ[b]; kCamp[k] = b; continue; }
+          const d = Math.hypot(c.cX[b] - kX[k], c.cZ[b] - kZ[k]);
+          if (!spread && b !== kCamp[k] && d >= 4 && lowSince[b * N_IDEAS + k] > knownT[k]) {
+            spread = { seed, idea: IDEA_NAMES[k], from: kCamp[k], to: b, dist: d, delay: w.stats.time - knownT[k] };
+          }
+        }
+      }
+    }
+    firsts.push(c.firstDiscT);
+    farmT.pas.push(farm < 0 ? 1e9 : farm);
+  }
+  const mean = firsts.reduce((s, x) => s + x, 0) / firsts.length;
+  check('5b first discovery: <= 600 s on every seed, mean <= 450', firsts.every(t => t >= 0 && t <= 600) && mean <= 450,
+    `${firsts.map(t => t.toFixed(0)).join(', ')} s, mean ${mean.toFixed(0)}`);
+  check('5b spread: an idea known in one camp later takes hold (>= 0.5) in a camp >= 4 units away that lacked it', !!spread && spread.delay > 30,
+    spread ? `seed ${spread.seed}: ${spread.idea} camp ${spread.from} -> ${spread.to} (${spread.dist.toFixed(1)} units) after ${spread.delay.toFixed(0)} s` : 'never');
+}
+
+// 5b-3: an idea nobody uses (Bridges: no Mason work exists before 5c) takes hold for 900 s, then fades
+{
+  const w = mk(), c = w.civ;
+  for (let i = 0; i < 600; i++) simStep(w);
+  const t0 = w.stats.time;
+  for (let b = 0; b < MAX_CAMPS; b++) if (c.cActive[b]) { c.kAdopt[b * N_IDEAS + IDEA_BRIDGES] = 0.6; c.kUsed[b * N_IDEAS + IDEA_BRIDGES] = t0; }
+  let peak = 0, at900 = -1;
+  while (w.stats.time - t0 < 1300) {
+    simStep(w);
+    const a = c.kAdopt[IDEA_BRIDGES];
+    if (w.stats.time - t0 < 905) peak = Math.max(peak, a);
+    if (at900 < 0 && w.stats.time - t0 >= 905) at900 = a;
+  }
+  const end = c.kAdopt[IDEA_BRIDGES];
+  check('5b fading: an unused idea grows for 900 s, then declines', peak > 0.8 && at900 > end + 0.1 && end > 0.05,
+    `peak ${peak.toFixed(2)}, at 905 s ${at900.toFixed(2)}, at 1,300 s ${end.toFixed(2)}`);
+}
+
+// 5b-4: character. Unpainted islands are Pastoral (bias ~0); the same seeds painted Industrious (bias -0.6 everywhere,
+// held each second against the bias decay) should find Farming later on most seeds.
+for (const seed of SEEDS5B) {
+  const w = mk(seed), c = w.civ;
+  let farm = -1, sec = 0;
+  const paint = () => { for (let i = 0; i < w.culturalBias.length; i++) if (!w.mask[i]) w.culturalBias[i] = -0.6; };
+  paint();
+  while (w.stats.time < 2400 && farm < 0) {
+    simStep(w);
+    if (w.stats.time >= sec) { sec = Math.floor(w.stats.time) + 1; paint(); }
+    if (c.kFirst[IDEA_FARMING]) farm = w.stats.time;
+  }
+  farmT.ind.push(farm < 0 ? 1e9 : farm);
+}
+{
+  const fmt = (t) => t > 1e8 ? 'none' : t.toFixed(0);
+  const wins = farmT.pas.filter((t, i) => t < farmT.ind[i]).length;
+  check('5b character: Farming comes earlier in Pastoral camps than Industrious ones on most seeds', wins >= 3,
+    `Pastoral ${farmT.pas.map(fmt).join('/')} vs Industrious ${farmT.ind.map(fmt).join('/')} s (${wins} of 5)`);
+}
 
 if (failed) { console.error(`${failed} society test(s) failed`); process.exit(1); }
 console.log('society tests passed');

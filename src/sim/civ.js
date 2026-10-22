@@ -9,6 +9,9 @@ import {
   createSocietyArrays, bindCivHelpers, seedFamily, markTownAlive, societyTick, settleArrive, killVillager,
   ST_SETTLE, GATE_MASON, GATE_RITUAL, GATE_FARM, SOCIETY,
 } from './society.js';
+import {
+  bindKnowHelpers, useIdea, noteForage, noteFlood, IDEA_FIRE, IDEA_SHELTER, IDEA_WOOD, IDEA_STONE, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL,
+} from './knowhow.js';
 
 // Roles
 export const ROLE_FORAGER = 0, ROLE_HAULER = 1, ROLE_MASON = 2, ROLE_MYSTIC = 3;
@@ -388,6 +391,7 @@ function arrive(world, v) {
   const civ = world.civ;
   const st = civ.vState[v];
   if (st === ST_FORAGE) {
+    noteForage(civ, civ.vCamp[v], world.stats.time);
     civ.vCargo[v] = Math.min(1, civ.vCargo[v] + 0.35);
     const i = cellOf(civ.vX[v], civ.vZ[v]);
     world.fertility[i] = Math.max(0, world.fertility[i] - 0.01);
@@ -397,6 +401,7 @@ function arrive(world, v) {
     civ.vCargo[v] = 0;
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.15);
   } else if (st === ST_REST) {
+    useIdea(civ, civ.vCamp[v], IDEA_FIRE, world.stats.time); useIdea(civ, civ.vCamp[v], IDEA_SHELTER, world.stats.time);
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.5);
     if (civ.vCargoKind[v] === MAT_FOOD && civ.vCargo[v] > 0) { addFood(civ, v, civ.vCargo[v] * 10); civ.vCargo[v] = 0; }   // home anyway: drop off the food
     const d = nearestDwelling(civ, civ.vX[v], civ.vZ[v], true, civ.societyOn === 1 ? civ.vCamp[v] : -1);   // rested at the nearest reachable home of its camp: settle there
@@ -405,7 +410,7 @@ function arrive(world, v) {
     if (civ.vAux[v] >= 0) civ.vHome[v] = civ.vAux[v];
   } else if (st === ST_CONSECRATE) {
     const s = civ.vAux[v];
-    if (s >= 0 && civ.sDecay[s] > 0.4) { reviveStructure(world, s); }
+    if (s >= 0 && civ.sDecay[s] > 0.4) { reviveStructure(world, s); useIdea(civ, civ.vCamp[v], IDEA_RITUAL, world.stats.time); }
   } else if (st === ST_SETTLE) {
     settleArrive(world, v);
     return;
@@ -426,9 +431,12 @@ function arrive(world, v) {
   } else if (st === ST_SUPPLY) {
     const o = civ.vSupply[v];
     if (o >= 0 && civ.oState[o] !== 0) civ.oMat[o] += 1;
+    if (civ.vCargoKind[v] === MAT_TIMBER) useIdea(civ, civ.vCamp[v], IDEA_WOOD, world.stats.time);
+    else if (civ.vCargoKind[v] === MAT_STONE) { useIdea(civ, civ.vCamp[v], IDEA_STONE, world.stats.time); useIdea(civ, civ.vCamp[v], IDEA_PATHS, world.stats.time); }
     releaseSupply(civ, v);
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.1);
   } else if (st === ST_PROCESSION) {
+    useIdea(civ, civ.vCamp[v], IDEA_RITUAL, world.stats.time);
     civ.vTimer[v] = 2.5 + world.rng.next() * 2;
     civ.lanternClock += 0;
     if (world.rng.next() < 0.45) emitEvent(world.events, EV_LANTERN, civ.vX[v], civ.vZ[v], 1);
@@ -657,6 +665,9 @@ function completeOrder(world, o) {
   const radius = kind === KIND_PAVING ? 0.4 : 0.2;
   markCoverFor(world, civ.oX[o], civ.oZ[o], civ.oDirX[o], civ.oDirZ[o], kind === KIND_PAVING ? 0.5 : civ.oLen[o], radius, kind);
   civ.built++; if (kind === KIND_BRIDGE) civ.bridges++;
+  const wc = civ.oWorker[o] >= 0 ? civ.vCamp[civ.oWorker[o]] : -1;   // the builder's camp used the know-how
+  if (kind === KIND_BRIDGE) useIdea(civ, wc, IDEA_BRIDGES, world.stats.time);
+  else { useIdea(civ, wc, IDEA_STONE, world.stats.time); useIdea(civ, wc, IDEA_PATHS, world.stats.time); }
   emitEvent(world.events, EV_BUILD_DONE, civ.oX[o], civ.oZ[o], kind);
   if (kind === KIND_BRIDGE && (civ.mythFlags & 1) === 0) { civ.mythFlags |= 1; civ.mythFirstBridge = true; recordMyth(world, MYTH_BRIDGE, civ.oX[o], civ.oZ[o]); }
   if (kind === KIND_STEPS && (civ.mythFlags & 16) === 0) { civ.mythFlags |= 16; recordMyth(world, MYTH_STEPS, civ.oX[o], civ.oZ[o]); }
@@ -740,6 +751,7 @@ function secondTick(world) {
     if (world.water[cellOf(civ.sX[s], civ.sZ[s])] > 0.035 && world.stats.time - civ.mythClock > 90) {
       civ.mythClock = world.stats.time;
       civ.sDecay[s] = Math.min(1, civ.sDecay[s] + 0.5);
+      noteFlood(civ, civ.sCamp[s], world.stats.time);
       recordMyth(world, MYTH_FLOOD, civ.sX[s], civ.sZ[s]);
     }
   }
@@ -878,3 +890,4 @@ function releaseVillager(world, v) {
 }
 
 bindCivHelpers({ releaseVillager, addDwelling, siteOk });
+bindKnowHelpers({ recordMyth, slopeAtCell });

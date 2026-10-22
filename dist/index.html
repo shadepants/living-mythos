@@ -646,6 +646,7 @@ const EV_MYTH = 9;
 const EV_ROCKFALL = 10;
 const EV_DUST = 11;
 const EV_REVIVE = 12;
+const EV_DISCOVERY = 13;   // a = camp * 10 + idea (Phase 5b)
 
 const EVENT_CAP = 128;
 
@@ -824,7 +825,8 @@ function createDebugOverlay() {
       const info = infoFn();
       el.textContent = `frame ${(ms / frames).toFixed(1)} ms  sim ${(simMs / frames).toFixed(2)} ms  tier ${info.tier}\n` +
         `water ${info.water.toFixed(0)}  rock ${info.rock.toFixed(0)}  (drift ${info.drift.toFixed(3)}%)\n` +
-        `villagers ${info.villagers}  structures ${info.structures}  myths ${info.myths}  particles ${info.particles}`;
+        `villagers ${info.villagers}  structures ${info.structures}  myths ${info.myths}  particles ${info.particles}` +
+        (info.discovery ? `\n${info.discovery}` : '');
       acc = 0; frames = 0; ms = 0; simMs = 0;
     },
   };
@@ -1258,6 +1260,9 @@ function directorStep(d, world, eng, s, spatial, now) {
       const ann = a >= 100;
       for (let j = 0; j < 4; j++) play(eng, d, degreeFreq(sc, 4 + civ.mMotif[idx * 4 + j], bias), 0.5, TIMBRE.bell, j * (ann ? 0.26 : 0.18));
       if (ann) play(eng, d, semiFreq(sc, 7, bias) / 2, 0.5, TIMBRE.warm, 0);
+    } else if (t === EV_DISCOVERY) {
+      // a camp found a new idea: three rising marimba notes (Phase 5b)
+      for (let j = 0; j < 3; j++) play(eng, d, degreeFreq(sc, 2 + j * 2, bias), 0.42, TIMBRE.marimba, j * 0.14);
     } else if (t === EV_REVIVE) {
       for (let j = 0; j < 5; j++) play(eng, d, degreeFreq(sc, 3 + j * 2, bias), 0.5, TIMBRE.bell, j * 0.07);
     } else if (t === EV_ROCKFALL) {
@@ -2251,6 +2256,207 @@ function homeFieldNext(world, x, z, out) {
   return true;
 }
 
+// ---- sim/knowhow.js ----
+// Phase 5b: know-how. Each camp holds an adoption value 0..1 for ten ideas; ideas are discovered where they are
+// needed, take hold inside the camp, spread by contact, travel with splits and fade when unused
+// (docs/SPEC-phase5-society.md section 4). Runs once per sim second from societyTick; zero allocation.
+
+const IDEA_FIRE = 0, IDEA_SHELTER = 1, IDEA_BASKETS = 2, IDEA_FARMING = 3, IDEA_WOOD = 4, IDEA_STONE = 5,
+  IDEA_BRIDGES = 6, IDEA_PATHS = 7, IDEA_RITUAL = 8, IDEA_STORAGE = 9, N_IDEAS = 10;
+const IDEA_NAMES = ['Fire', 'Shelter', 'Baskets', 'Farming', 'Woodworking', 'Stonework', 'Bridges', 'Paths', 'Ritual', 'Storage'];
+const MYTH_DISCOVERY = 7;   // myth kind of a stone carved for a discovery (civ.js kinds are 1-6)
+
+const KN_CAMPS = 8;   // = MAX_CAMPS in society.js (kept local: society imports this module)
+const CH_IND = 0, CH_PAS = 1, CH_MYS = 2, CH_NONE = 3;
+// prereq (-1 none) and the character that doubles the discovery chance (spec 4.1)
+const PREREQ = [-1, IDEA_FIRE, -1, IDEA_BASKETS, IDEA_FIRE, IDEA_FIRE, IDEA_WOOD, IDEA_STONE, IDEA_FIRE, IDEA_BASKETS];
+const FAVOUR = [CH_NONE, CH_NONE, CH_PAS, CH_PAS, CH_NONE, CH_IND, CH_IND, CH_IND, CH_MYS, CH_PAS];
+
+const K = {
+  known: 0.5, lost: 0.05,
+  baseFire: 1 / 300, baseOther: 1 / 1200, popScale: 20, charMult: 2, monoMult: 2,
+  startAdopt: 0.1, growth: 1 / 90, contactR: 1.5, spread: 0.004, splitKeep: 0.8,
+  fadeAfter: 900, fadeRate: 1 / 1800,
+  tripWindow: 600, tripsFull: 40, fertileSec: 600, fertileGround: 0.6, richWindow: 300, floodShelter: 300,
+  envEvery: 10, shelterR: 2, woodR: 3, stoneR: 3, frustR: 4, ritualR: 4, forest: 0.65, trodden: 0.5,
+};
+const KNOWHOW = Object.freeze(K);
+
+let KH = null;   // civ.js helpers (recordMyth, slopeAtCell), bound at load to avoid an import cycle
+function bindKnowHelpers(h) { KH = h; }
+
+function createKnowhowArrays() {
+  const n = KN_CAMPS * N_IDEAS;
+  return {
+    kAdopt: new Float32Array(n), kUsed: new Float32Array(n), kNeed: new Float32Array(n),
+    kTrips: new Float32Array(KN_CAMPS), kFertSec: new Float32Array(KN_CAMPS), kRichSec: new Float32Array(KN_CAMPS),
+    kFloodT: new Float32Array(KN_CAMPS).fill(-1e9),
+    kFirst: new Uint8Array(N_IDEAS), discoveries: 0, firstDiscT: -1,
+    kRngS: 0,   // state of know-how's own random stream (0 = not started); saved, so restores stay deterministic
+  };
+}
+
+function knows(civ, c, idea) { return c >= 0 && civ.kAdopt[c * N_IDEAS + idea] >= K.known; }
+
+// the action an idea enables just happened in camp c: it stays fresh (spec 4.5)
+function useIdea(civ, c, idea, t) { if (c >= 0) civ.kUsed[c * N_IDEAS + idea] = t; }
+
+// a forage visit landed (civ arrive): Baskets/Farming use, and the trip counter behind the Baskets need
+function noteForage(civ, c, t) {
+  if (c < 0) return;
+  civ.kTrips[c] += 1;
+  useIdea(civ, c, IDEA_BASKETS, t); useIdea(civ, c, IDEA_FARMING, t);
+}
+
+// a flood reached one of camp c's homes: Shelter is needed for a while
+function noteFlood(civ, c, t) { if (c >= 0) civ.kFloodT[c] = t; }
+
+// a new camp n split from camp c: the family carries the ideas, slightly diluted (spec 3.7 step 5)
+function splitCarry(civ, c, n, t) {
+  for (let k = 0; k < N_IDEAS; k++) {
+    const a = civ.kAdopt[c * N_IDEAS + k] * K.splitKeep;
+    civ.kAdopt[n * N_IDEAS + k] = a < K.lost ? 0 : a;
+    civ.kUsed[n * N_IDEAS + k] = civ.kUsed[c * N_IDEAS + k];   // carried, not used: the parent's clocks come along
+    civ.kNeed[n * N_IDEAS + k] = civ.kNeed[c * N_IDEAS + k];
+  }
+  civ.kTrips[n] = 0; civ.kFertSec[n] = 0; civ.kRichSec[n] = 0; civ.kFloodT[n] = -1e9;
+}
+
+// a camp slot was (re)opened with no history (the founding family, wanderers)
+function clearCamp(civ, c) {
+  for (let k = 0; k < N_IDEAS; k++) { civ.kAdopt[c * N_IDEAS + k] = 0; civ.kUsed[c * N_IDEAS + k] = 0; civ.kNeed[c * N_IDEAS + k] = 0; }
+  civ.kTrips[c] = 0; civ.kFertSec[c] = 0; civ.kRichSec[c] = 0; civ.kFloodT[c] = -1e9;
+}
+
+function campChar(world, c) {
+  const b = sampleGrid(world.culturalBias, world.civ.cX[c], world.civ.cZ[c]);
+  return b < -0.33 ? CH_IND : b > 0.33 ? CH_MYS : CH_PAS;
+}
+
+function nearMonolith(world, x, z, r) {
+  const m = world.monoliths;
+  for (let k = 0; k < 8; k++) {
+    if (m[k * 4 + 3] === 0) continue;
+    const dx = m[k * 4] - x, dz = m[k * 4 + 1] - z;
+    if (dx * dx + dz * dz < r * r) return true;
+  }
+  return false;
+}
+
+// area signals around camp c, refreshed every envEvery s (staggered per camp): they change over minutes
+function refreshEnv(world, c) {
+  const civ = world.civ, i0 = c * N_IDEAS;
+  const gx = Math.round(worldToGridX(civ.cX[c])), gz = Math.round(worldToGridZ(civ.cZ[c]));
+  const cell = 20 / GRID_W, rc = Math.ceil(K.frustR / cell);
+  let mN = 0, mS = 0, wN = 0, wS = 0, sN = 0, sS = 0, bN = 0, bS = 0, pN = 0, pS = 0;
+  for (let dz = -rc; dz <= rc; dz++) for (let dx = -rc; dx <= rc; dx++) {
+    const x = gx + dx, z = gz + dz;
+    if (x < 0 || z < 0 || x >= GRID_W || z >= GRID_H) continue;
+    const i = z * GRID_W + x;
+    if (world.mask[i] === 1) continue;
+    const d = Math.sqrt(dx * dx + dz * dz) * cell;
+    if (d > K.frustR) continue;
+    const steep = KH.slopeAtCell(world.elev, i) > TUNING.steepSlope;
+    if (d <= K.shelterR) { mN++; mS += world.moisture[i]; }
+    if (d <= K.woodR) { wN++; if (world.biomass[i] > K.forest) wS++; }
+    if (d <= K.stoneR) { sN++; if (steep) sS++; }
+    if (world.water[i] > 0.004) { bN++; bS += world.frustration[i]; }
+    else if (steep || world.compaction[i] > K.trodden) { pN++; pS += world.frustration[i]; }
+  }
+  civ.kNeed[i0 + IDEA_SHELTER] = mN ? mS / mN : 0;
+  civ.kNeed[i0 + IDEA_WOOD] = wN ? wS / wN : 0;
+  civ.kNeed[i0 + IDEA_STONE] = sN ? sS / sN : 0;
+  civ.kNeed[i0 + IDEA_BRIDGES] = bN ? bS / bN : 0;
+  civ.kNeed[i0 + IDEA_PATHS] = pN ? pS / pN : 0;
+  let sacred = nearMonolith(world, civ.cX[c], civ.cZ[c], K.ritualR);
+  for (let k = 0; k < civ.nM && !sacred; k++) {
+    const dx = civ.mX[k] - civ.cX[c], dz = civ.mZ[k] - civ.cZ[c];
+    if (civ.mStruct[k] >= 0 && dx * dx + dz * dz < K.ritualR * K.ritualR) sacred = true;
+  }
+  civ.kNeed[i0 + IDEA_RITUAL] = 0.3 + (sacred ? 0.7 : 0);
+}
+
+// stateless 0..1 draw per (seed, second, camp, idea): discovery rolls leave world.rng's sequence alone,
+// so adding know-how does not reshuffle the rest of the sim
+function roll(seed, t, c, k) {
+  let h = Math.imul(seed ^ 0x27d4eb2d, 0x9e3779b1) ^ Math.imul(Math.floor(t) + 1, 0x85ebca6b) ^ Math.imul(c * 16 + k + 1, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d); h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+function discover(world, c, idea) {
+  const civ = world.civ, t = world.stats.time;
+  civ.kAdopt[c * N_IDEAS + idea] = K.startAdopt; civ.kUsed[c * N_IDEAS + idea] = t;
+  civ.discoveries++;
+  if (civ.firstDiscT < 0) civ.firstDiscT = t;
+  emitEvent(world.events, EV_DISCOVERY, civ.cX[c], civ.cZ[c], c * N_IDEAS + idea);
+  const first = civ.kFirst[idea] === 0;
+  civ.kFirst[idea] = 1;
+  if (first || nearMonolith(world, civ.cX[c], civ.cZ[c], TUNING.monolithRadius)) {
+    // the stone's placement and motif draw from know-how's own stream, so world.rng's sequence is untouched
+    const main = world.rng.s;
+    world.rng.s = civ.kRngS !== 0 ? civ.kRngS : ((world.seed ^ 0x51ed270b) >>> 0) || 1;
+    KH.recordMyth(world, MYTH_DISCOVERY, civ.cX[c], civ.cZ[c]);
+    civ.kRngS = world.rng.s; world.rng.s = main;
+  }
+}
+
+// once per sim second, after society's recount (cPop current)
+function knowhowTick(world, maxCamps, campCap) {
+  const civ = world.civ, t = world.stats.time;
+  const tripDecay = 1 - 1 / K.tripWindow, fertDecay = 1 - 1 / K.fertileSec, richDecay = 1 - 1 / K.richWindow;
+  // per-second signals from what villagers are doing
+  for (let c = 0; c < maxCamps; c++) { civ.kTrips[c] *= tripDecay; civ.kFertSec[c] *= fertDecay; civ.kRichSec[c] *= richDecay; }
+  for (let v = 0; v < civ.nV; v++) {
+    if (civ.vAlive[v] === 0) continue;
+    const a = civ.vCamp[v];
+    if (a < 0) continue;
+    if (civ.vState[v] === 2 /* ST_FORAGE */ && sampleGrid(world.fertility, civ.vX[v], civ.vZ[v]) > K.fertileGround) civ.kFertSec[a] += 1;
+    // contact: a villager near another camp's centre passes on what its own camp knows (spec 4.4)
+    for (let b = 0; b < maxCamps; b++) {
+      if (b === a || civ.cActive[b] === 0) continue;
+      const dx = civ.vX[v] - civ.cX[b], dz = civ.vZ[v] - civ.cZ[b];
+      if (dx * dx + dz * dz > K.contactR * K.contactR) continue;
+      for (let k = 0; k < N_IDEAS; k++) {
+        const ia = a * N_IDEAS + k, ib = b * N_IDEAS + k;
+        const d = civ.kAdopt[ia] - civ.kAdopt[ib];
+        if (d <= 0) continue;
+        if (civ.kAdopt[ib] < K.lost) civ.kUsed[ib] = t;   // newly heard of: fresh, not stale
+        civ.kAdopt[ib] = Math.min(1, civ.kAdopt[ib] + K.spread * d);
+      }
+    }
+  }
+  for (let c = 0; c < maxCamps; c++) {
+    if (civ.cActive[c] === 0 || civ.cHomeSlot[c] < 0) continue;   // settling parties discover nothing until they arrive
+    const i0 = c * N_IDEAS, pop = civ.cPop[c];
+    if (civ.cFood[c] > campCap * 10) { civ.kRichSec[c] += 1; useIdea(civ, c, IDEA_STORAGE, t); }
+    if ((Math.floor(t) + c) % K.envEvery === 0) refreshEnv(world, c);
+    civ.kNeed[i0 + IDEA_FIRE] = 1;
+    if (t - civ.kFloodT[c] < K.floodShelter) civ.kNeed[i0 + IDEA_SHELTER] = 1;
+    civ.kNeed[i0 + IDEA_BASKETS] = Math.min(1, civ.kTrips[c] / K.tripsFull);
+    civ.kNeed[i0 + IDEA_FARMING] = Math.min(1, civ.kFertSec[c] / K.fertileSec);
+    civ.kNeed[i0 + IDEA_STORAGE] = Math.min(1, civ.kRichSec[c] / K.richWindow);
+    const ch = campChar(world, c);
+    const mono = nearMonolith(world, civ.cX[c], civ.cZ[c], TUNING.monolithRadius) ? K.monoMult : 1;
+    for (let k = 0; k < N_IDEAS; k++) {
+      const i = i0 + k;
+      let a = civ.kAdopt[i];
+      if (a < K.lost) {
+        // discovery (spec 4.2): needs its prereq known; one draw per eligible idea per second
+        if (PREREQ[k] >= 0 && civ.kAdopt[i0 + PREREQ[k]] < K.known) continue;
+        const p = (k === IDEA_FIRE ? K.baseFire : K.baseOther) * Math.min(1, civ.kNeed[i]) * (1 + pop / K.popScale)
+          * (FAVOUR[k] === ch ? K.charMult : 1) * mono;
+        if (roll(world.seed, t, c, k) < p) discover(world, c, k);
+        continue;
+      }
+      // in use: takes hold (logistic); unused for fadeAfter: stops growing and fades until lost (spec 4.3, 4.5)
+      if (t - civ.kUsed[i] < K.fadeAfter) a += K.growth * a * (1 - a);
+      else a -= K.fadeRate;
+      civ.kAdopt[i] = a < K.lost ? 0 : a > 1 ? 1 : a;
+    }
+  }
+}
+
 // ---- sim/society.js ----
 // Phase 5a: the island starts with one family that grows, splits into camps and can die out locally
 // (docs/SPEC-phase5-society.md section 3). Runs once per sim second from civ's secondTick; zero allocation.
@@ -2286,6 +2492,7 @@ function createSocietyArrays(nV, nS) {
     cPop: new Int32Array(MAX_CAMPS), cHomes: new Int32Array(MAX_CAMPS), cHomeSlot: i32(MAX_CAMPS),
     nAlive: 0, emptyT: 0, societyOn: 0, gates: 0, splits: 0,
     hCount: new Int32Array(nS), cOldest: i32(MAX_CAMPS),   // runtime scratch (recomputed every tick)
+    ...createKnowhowArrays(),
   };
 }
 
@@ -2339,6 +2546,7 @@ function newCamp(world, x, z, food) {
   civ.cActive[c] = 1; civ.cX[c] = x; civ.cZ[c] = z; civ.cFood[c] = food;
   civ.cBirthT[c] = 0; civ.cSplitT[c] = 0; civ.cStarveT[c] = 0; civ.cFounded[c] = world.stats.time;
   civ.cPop[c] = 0; civ.cHomes[c] = 0; civ.cHomeSlot[c] = -1;
+  clearCamp(civ, c);   // no know-how yet (a split copies its parent's afterwards)
   return c;
 }
 
@@ -2483,6 +2691,7 @@ function trySplit(world, c) {
   civ.cFood[c] -= food;
   civ.cPop[n] = ln; civ.cPop[c] -= ln;   // counted now, so the new camp is not taken for abandoned later this tick
   civ.splits++;
+  splitCarry(civ, c, n, world.stats.time);
   for (let v = 0; v < civ.nV; v++) {
     if (civ.vAlive[v] === 0 || civ.vHome[v] !== leave) continue;
     H.releaseVillager(world, v);
@@ -2584,6 +2793,7 @@ function societyTick(world) {
     }
     trySplit(world, c);
   }
+  knowhowTick(world, MAX_CAMPS, campCap());
 }
 
 // ---- sim/civ.js ----
@@ -2965,6 +3175,7 @@ function arrive(world, v) {
   const civ = world.civ;
   const st = civ.vState[v];
   if (st === ST_FORAGE) {
+    noteForage(civ, civ.vCamp[v], world.stats.time);
     civ.vCargo[v] = Math.min(1, civ.vCargo[v] + 0.35);
     const i = cellOf(civ.vX[v], civ.vZ[v]);
     world.fertility[i] = Math.max(0, world.fertility[i] - 0.01);
@@ -2974,6 +3185,7 @@ function arrive(world, v) {
     civ.vCargo[v] = 0;
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.15);
   } else if (st === ST_REST) {
+    useIdea(civ, civ.vCamp[v], IDEA_FIRE, world.stats.time); useIdea(civ, civ.vCamp[v], IDEA_SHELTER, world.stats.time);
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.5);
     if (civ.vCargoKind[v] === MAT_FOOD && civ.vCargo[v] > 0) { addFood(civ, v, civ.vCargo[v] * 10); civ.vCargo[v] = 0; }   // home anyway: drop off the food
     const d = nearestDwelling(civ, civ.vX[v], civ.vZ[v], true, civ.societyOn === 1 ? civ.vCamp[v] : -1);   // rested at the nearest reachable home of its camp: settle there
@@ -2982,7 +3194,7 @@ function arrive(world, v) {
     if (civ.vAux[v] >= 0) civ.vHome[v] = civ.vAux[v];
   } else if (st === ST_CONSECRATE) {
     const s = civ.vAux[v];
-    if (s >= 0 && civ.sDecay[s] > 0.4) { reviveStructure(world, s); }
+    if (s >= 0 && civ.sDecay[s] > 0.4) { reviveStructure(world, s); useIdea(civ, civ.vCamp[v], IDEA_RITUAL, world.stats.time); }
   } else if (st === ST_SETTLE) {
     settleArrive(world, v);
     return;
@@ -3003,9 +3215,12 @@ function arrive(world, v) {
   } else if (st === ST_SUPPLY) {
     const o = civ.vSupply[v];
     if (o >= 0 && civ.oState[o] !== 0) civ.oMat[o] += 1;
+    if (civ.vCargoKind[v] === MAT_TIMBER) useIdea(civ, civ.vCamp[v], IDEA_WOOD, world.stats.time);
+    else if (civ.vCargoKind[v] === MAT_STONE) { useIdea(civ, civ.vCamp[v], IDEA_STONE, world.stats.time); useIdea(civ, civ.vCamp[v], IDEA_PATHS, world.stats.time); }
     releaseSupply(civ, v);
     civ.vEnergy[v] = Math.min(1, civ.vEnergy[v] + 0.1);
   } else if (st === ST_PROCESSION) {
+    useIdea(civ, civ.vCamp[v], IDEA_RITUAL, world.stats.time);
     civ.vTimer[v] = 2.5 + world.rng.next() * 2;
     civ.lanternClock += 0;
     if (world.rng.next() < 0.45) emitEvent(world.events, EV_LANTERN, civ.vX[v], civ.vZ[v], 1);
@@ -3234,6 +3449,9 @@ function completeOrder(world, o) {
   const radius = kind === KIND_PAVING ? 0.4 : 0.2;
   markCoverFor(world, civ.oX[o], civ.oZ[o], civ.oDirX[o], civ.oDirZ[o], kind === KIND_PAVING ? 0.5 : civ.oLen[o], radius, kind);
   civ.built++; if (kind === KIND_BRIDGE) civ.bridges++;
+  const wc = civ.oWorker[o] >= 0 ? civ.vCamp[civ.oWorker[o]] : -1;   // the builder's camp used the know-how
+  if (kind === KIND_BRIDGE) useIdea(civ, wc, IDEA_BRIDGES, world.stats.time);
+  else { useIdea(civ, wc, IDEA_STONE, world.stats.time); useIdea(civ, wc, IDEA_PATHS, world.stats.time); }
   emitEvent(world.events, EV_BUILD_DONE, civ.oX[o], civ.oZ[o], kind);
   if (kind === KIND_BRIDGE && (civ.mythFlags & 1) === 0) { civ.mythFlags |= 1; civ.mythFirstBridge = true; recordMyth(world, MYTH_BRIDGE, civ.oX[o], civ.oZ[o]); }
   if (kind === KIND_STEPS && (civ.mythFlags & 16) === 0) { civ.mythFlags |= 16; recordMyth(world, MYTH_STEPS, civ.oX[o], civ.oZ[o]); }
@@ -3317,6 +3535,7 @@ function secondTick(world) {
     if (world.water[cellOf(civ.sX[s], civ.sZ[s])] > 0.035 && world.stats.time - civ.mythClock > 90) {
       civ.mythClock = world.stats.time;
       civ.sDecay[s] = Math.min(1, civ.sDecay[s] + 0.5);
+      noteFlood(civ, civ.sCamp[s], world.stats.time);
       recordMyth(world, MYTH_FLOOD, civ.sX[s], civ.sZ[s]);
     }
   }
@@ -3455,6 +3674,7 @@ function releaseVillager(world, v) {
 }
 
 bindCivHelpers({ releaseVillager, addDwelling, siteOk });
+bindKnowHelpers({ recordMyth, slopeAtCell });
 
 // ---- gl/structures.js ----
 const GLOW_N = 24;
@@ -4915,17 +5135,18 @@ function prewarm(world, ticks, substepsPerTick) {
 // ---- sim/persist.js ----
 // Save / restore of the living world (spec 1.6). Typed arrays travel as base64; everything else as small JSON.
 const SAVE_KEY = 'mythos.save.v1';
-const SAVE_VERSION = 3;   // 3: Phase 5 society (camps, ages). Older saves are not converted: a fresh primitive island starts
+const SAVE_VERSION = 3;   // 3: Phase 5 society (camps, ages, know-how). Older saves are not converted: a fresh primitive island starts
 
 const WORLD_F32 = ['elev', 'water', 'sediment', 'moisture', 'fertility', 'compaction', 'frustration', 'culturalBias', 'monoliths', 'monoPulse', 'biomass'];
 const WORLD_U8 = ['engCover'];
 const CIV_F32 = ['vX', 'vZ', 'vVX', 'vVZ', 'vTX', 'vTZ', 'vCargo', 'vEnergy', 'vPhase', 'vTimer', 'vHeading',
   'sX', 'sZ', 'sRot', 'sBias', 'sBuild', 'sDecay', 'sLum', 'sDirX', 'sDirZ', 'sLen', 'mX', 'mZ', 'mT0', 'mSeed', 'monoX', 'monoZ',
-  'vAge', 'vLife', 'cX', 'cZ', 'cFood', 'cBirthT', 'cSplitT', 'cStarveT', 'cFounded'];
-const CIV_U8 = ['vRole', 'vState', 'sKind', 'sActive', 'mKind', 'mMotif', 'vAlive', 'cActive'];
+  'vAge', 'vLife', 'cX', 'cZ', 'cFood', 'cBirthT', 'cSplitT', 'cStarveT', 'cFounded',
+  'kAdopt', 'kUsed', 'kNeed', 'kTrips', 'kFertSec', 'kRichSec', 'kFloodT'];
+const CIV_U8 = ['vRole', 'vState', 'sKind', 'sActive', 'mKind', 'mMotif', 'vAlive', 'cActive', 'kFirst'];
 const CIV_I32 = ['vHome', 'vAux', 'mStruct', 'mAnniv', 'monoStruct', 'vCamp', 'sCamp', 'cPop', 'cHomes', 'cHomeSlot'];
 const CIV_NUM = ['nS', 'dwellings', 'nM', 'food', 'masons', 'built', 'bridges', 'revived', 'mythFlags', 'mythClock',
-  'nAlive', 'emptyT', 'societyOn', 'gates', 'splits'];
+  'nAlive', 'emptyT', 'societyOn', 'gates', 'splits', 'discoveries', 'firstDiscT', 'kRngS'];
 
 function toB64(arr) {
   const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
@@ -4974,7 +5195,7 @@ function restoreWorld(world, text) {
   // sanity: elevations and fertility must be finite and in range before we trust the data
   for (const [target, src] of staged) {
     if (target === world.elev) { for (let i = 0; i < GRID_N; i++) if (!Number.isFinite(src[i]) || src[i] > 10 || src[i] < -10) return { ok: false }; }
-    if (target === world.fertility || target === world.biomass) { for (let i = 0; i < GRID_N; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
+    if (target === world.fertility || target === world.biomass || target === civ.kAdopt) { for (let i = 0; i < src.length; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
   }
   for (const [target, src] of staged) target.set(src);
   for (const k of CIV_NUM) civ[k] = data.n[k];
@@ -5327,6 +5548,8 @@ function boot() {
   }
   createPhotoButton(uiEl, takePhoto);
   const debugUi = DEBUG ? createDebugOverlay() : null;
+  const discCur = { i: world.events.head };   // debug toast: the latest discovery (Phase 5b)
+  let discText = '';
   const reporter = query.has('report') ? createReporter(renderer, canvas, {
     tier: () => TIER_NAMES[gov.tier], loss: () => lossLog, simTime: () => world.stats.time,
     input: () => ({ ...ctl.st.stats, log: ctl.st.stats.log.slice(-12), camDist: +camera.position.distanceTo(controls.target).toFixed(1), tool: ctl.st.tool, monoliths: world.monoliths.filter((v, i) => i % 4 === 3 && v).length, cursorA: +ctl.st.alpha.toFixed(2) }), villagers: () => world.civ.nV, structures: () => world.civ.nS, particles: () => particles.count,
@@ -5416,11 +5639,17 @@ function boot() {
     frame++;
     if (debugUi) {
       debugUi.sample(dt, simMs);
+      for (let k = nextEvent(world.events, discCur); k >= 0; k = nextEvent(world.events, discCur)) {
+        if (world.events.type[k] !== EV_DISCOVERY) continue;
+        const a = world.events.a[k];
+        discText = `discovery: camp ${Math.floor(a / N_IDEAS)} found ${IDEA_NAMES[a % N_IDEAS]} at ${world.stats.time.toFixed(0)} s (${world.civ.discoveries} so far)`;
+        console.info('[mythos] ' + discText);
+      }
       debugUi.update(dt, () => {
         let w = 0; for (let i = 0; i < world.water.length; i++) if (!world.mask[i]) w += world.water[i];
         const rock = landSum(world.elev, world.sediment);
         return { tier: TIER_NAMES[gov.tier], water: w, rock, drift: (rock + world.stats.quarried - rock0) / rock0 * 100,   // quarried stone left the ground on purpose
-        villagers: world.civ.nV, structures: world.civ.nS, myths: world.civ.nM, particles: particles.count };
+        villagers: world.civ.nAlive, structures: world.civ.nS, myths: world.civ.nM, particles: particles.count, discovery: discText };
       });
     }
     if (DEBUG && frame === 1) console.info('[mythos] programs compiled:', renderer.info.programs.length);

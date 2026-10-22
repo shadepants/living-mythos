@@ -295,5 +295,19 @@ Seeds for the multi-seed tests: 1337, 7, 4242 (5a); add 99 and 2026 for 5b and 5
 
 ## Changelog
 
+### v1.1 - 2026-10-22 (5b built)
+- Know-how lives in `src/sim/knowhow.js`, run from `societyTick` once per second. `EV_DISCOVERY` plays three rising
+  marimba notes; with `?debug=1` the overlay and console show the latest discovery.
+- A split carries the parent's "last used" clocks, not fresh ones (otherwise every split counted as using every idea
+  and ideas never faded).
+- Discovery draws and discovery myth stones use their own random stream (a stateless hash and the saved `kRngS`),
+  so adding know-how does not reshuffle the rest of the sim. Reason: 5a's growth on seeds 7 and 4242 sits right at
+  the test thresholds, and any change to `world.rng`'s sequence flipped them (seed 7 lands on exactly 12 people at
+  3,600 s). That fragility is 5e's growth-pace work.
+- Character: `culturalBias` starts within ±0.1, so without monoliths or buildings every camp is Pastoral. Test 4
+  paints the island Industrious (bias -0.6) for the comparison runs. Result: Farming earlier in Pastoral on 4 of 5 seeds.
+- Results: first discovery 46-110 s (mean 77); spread seen 7.4 units away ~155 s later; an unused idea goes
+  1.00 -> 0.78 over 400 s after the 900 s grace.
+
 ### v1.0 - 2026-10-22
 - First draft from the 2026-10-21 evaluation and Jordan's grill answers.

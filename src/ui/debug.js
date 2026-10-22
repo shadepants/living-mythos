@@ -13,7 +13,8 @@ export function createDebugOverlay() {
       const info = infoFn();
       el.textContent = `frame ${(ms / frames).toFixed(1)} ms  sim ${(simMs / frames).toFixed(2)} ms  tier ${info.tier}\n` +
         `water ${info.water.toFixed(0)}  rock ${info.rock.toFixed(0)}  (drift ${info.drift.toFixed(3)}%)\n` +
-        `villagers ${info.villagers}  structures ${info.structures}  myths ${info.myths}  particles ${info.particles}`;
+        `villagers ${info.villagers}  structures ${info.structures}  myths ${info.myths}  particles ${info.particles}` +
+        (info.discovery ? `\n${info.discovery}` : '');
       acc = 0; frames = 0; ms = 0; simMs = 0;
     },
   };

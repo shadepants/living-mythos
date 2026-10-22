@@ -178,7 +178,8 @@ Detailed rules: `docs/SPEC-phase5-society.md`.
 
 - **5a** Families, births and deaths, camps splitting (new `src/sim/society.js`; reuse the 120 villager slots, hide
   unused ones).
-- **5b** Know-how: per-camp ideas, discovery triggers, spread by contact, fading.
+- **5b** Know-how: per-camp ideas, discovery triggers, spread by contact, fading. Built 2026-10-22 on branch
+  `phase5a-society` (spec v1.1); not yet seen on the phone.
 - **5c** Existing features gated behind discoveries (Mason works, timber/stone hauling, building types, paving,
   bridges), plus myth hooks.
 - **5d** Models by stage: hide shelter -> wattle hut -> timber cottage -> stone house; villagers from hides to role

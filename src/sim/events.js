@@ -11,6 +11,7 @@ export const EV_MYTH = 9;
 export const EV_ROCKFALL = 10;
 export const EV_DUST = 11;
 export const EV_REVIVE = 12;
+export const EV_DISCOVERY = 13;   // a = camp * 10 + idea (Phase 5b)
 
 export const EVENT_CAP = 128;
 

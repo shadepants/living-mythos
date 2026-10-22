@@ -2,7 +2,7 @@ import { SCALES, scaleFor, degreeFreq, semiFreq, TIMBRE } from './music.js';
 import { sampleGrid } from '../sim/sample.js';
 import {
   nextEvent, EV_SCULPT, EV_RAIN_DROP, EV_MONOLITH_PLACE, EV_MONOLITH_PULSE, EV_BUILD_DONE, EV_LANTERN, EV_CHIME, EV_GREET,
-  EV_MYTH, EV_ROCKFALL, EV_REVIVE,
+  EV_MYTH, EV_ROCKFALL, EV_REVIVE, EV_DISCOVERY,
 } from '../sim/events.js';
 
 // Maps sim events to diegetic music (spec 7). spatial(x, z, out) fills out.pan (-1..1) and out.gain (0..1).
@@ -53,6 +53,9 @@ export function directorStep(d, world, eng, s, spatial, now) {
       const ann = a >= 100;
       for (let j = 0; j < 4; j++) play(eng, d, degreeFreq(sc, 4 + civ.mMotif[idx * 4 + j], bias), 0.5, TIMBRE.bell, j * (ann ? 0.26 : 0.18));
       if (ann) play(eng, d, semiFreq(sc, 7, bias) / 2, 0.5, TIMBRE.warm, 0);
+    } else if (t === EV_DISCOVERY) {
+      // a camp found a new idea: three rising marimba notes (Phase 5b)
+      for (let j = 0; j < 3; j++) play(eng, d, degreeFreq(sc, 2 + j * 2, bias), 0.42, TIMBRE.marimba, j * 0.14);
     } else if (t === EV_REVIVE) {
       for (let j = 0; j < 5; j++) play(eng, d, degreeFreq(sc, 3 + j * 2, bias), 0.5, TIMBRE.bell, j * 0.07);
     } else if (t === EV_ROCKFALL) {

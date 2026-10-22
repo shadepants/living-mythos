@@ -1,6 +1,7 @@
 import { TUNING } from './tuning.js';
 import { GRID_W, GRID_H } from './grid.js';
 import { sampleGrid, worldToGridX, worldToGridZ } from './sample.js';
+import { createKnowhowArrays, clearCamp, splitCarry, knowhowTick } from './knowhow.js';
 
 // Phase 5a: the island starts with one family that grows, splits into camps and can die out locally
 // (docs/SPEC-phase5-society.md section 3). Runs once per sim second from civ's secondTick; zero allocation.
@@ -36,6 +37,7 @@ export function createSocietyArrays(nV, nS) {
     cPop: new Int32Array(MAX_CAMPS), cHomes: new Int32Array(MAX_CAMPS), cHomeSlot: i32(MAX_CAMPS),
     nAlive: 0, emptyT: 0, societyOn: 0, gates: 0, splits: 0,
     hCount: new Int32Array(nS), cOldest: i32(MAX_CAMPS),   // runtime scratch (recomputed every tick)
+    ...createKnowhowArrays(),
   };
 }
 
@@ -89,6 +91,7 @@ function newCamp(world, x, z, food) {
   civ.cActive[c] = 1; civ.cX[c] = x; civ.cZ[c] = z; civ.cFood[c] = food;
   civ.cBirthT[c] = 0; civ.cSplitT[c] = 0; civ.cStarveT[c] = 0; civ.cFounded[c] = world.stats.time;
   civ.cPop[c] = 0; civ.cHomes[c] = 0; civ.cHomeSlot[c] = -1;
+  clearCamp(civ, c);   // no know-how yet (a split copies its parent's afterwards)
   return c;
 }
 
@@ -233,6 +236,7 @@ function trySplit(world, c) {
   civ.cFood[c] -= food;
   civ.cPop[n] = ln; civ.cPop[c] -= ln;   // counted now, so the new camp is not taken for abandoned later this tick
   civ.splits++;
+  splitCarry(civ, c, n, world.stats.time);
   for (let v = 0; v < civ.nV; v++) {
     if (civ.vAlive[v] === 0 || civ.vHome[v] !== leave) continue;
     H.releaseVillager(world, v);
@@ -334,4 +338,5 @@ export function societyTick(world) {
     }
     trySplit(world, c);
   }
+  knowhowTick(world, MAX_CAMPS, campCap());
 }

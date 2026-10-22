@@ -14,6 +14,7 @@ const mk = () => { const w = createWorld(1337); prewarm(w); seedCivilization(w);
 const a = mk();
 placeMonolith(a, 2, 1);
 for (let i = 0; i < 1500; i++) simStep(a);
+a.civ.kAdopt[2] = 0.7; a.civ.kUsed[2] = 31.5; a.civ.kFirst[2] = 1; a.civ.discoveries = 1;   // non-zero know-how to round-trip
 const text = serializeWorld(a, { atmo: 0.5 });
 check('save: payload is a JSON string under 1.6 MB', typeof text === 'string' && text.length < 1.6e6, `${(text.length / 1024).toFixed(0)} KB`);
 
@@ -23,6 +24,7 @@ check('restore: a valid save is accepted and returns the extra state', r.ok && r
 check('restore: terrain, soil and culture arrays match exactly', same(a.elev, b.elev) && same(a.fertility, b.fertility) && same(a.culturalBias, b.culturalBias) && same(a.compaction, b.compaction) && same(a.engCover, b.engCover));
 check('restore: villagers, structures, myths and monoliths match', same(a.civ.vX, b.civ.vX) && same(a.civ.sX, b.civ.sX) && same(a.civ.sKind, b.civ.sKind) && same(a.monoliths, b.monoliths) && a.civ.nS === b.civ.nS && a.civ.nM === b.civ.nM && a.stats.time === b.stats.time);
 check('restore: society state (camps, ages, households) matches', ['vAlive', 'vAge', 'vLife', 'vCamp', 'sCamp', 'cActive', 'cPop', 'cHomes', 'cFood', 'cX', 'cZ'].every(k => same(a.civ[k], b.civ[k])) && a.civ.nAlive === b.civ.nAlive && a.civ.societyOn === b.civ.societyOn && a.civ.gates === b.civ.gates && a.civ.splits === b.civ.splits, `alive ${a.civ.nAlive} vs ${b.civ.nAlive}`);
+check('restore: know-how (adoption, idea clocks, need signals) matches', ['kAdopt', 'kUsed', 'kNeed', 'kTrips', 'kFertSec', 'kRichSec', 'kFloodT', 'kFirst'].every(k => same(a.civ[k], b.civ[k])) && a.civ.discoveries === b.civ.discoveries && a.civ.firstDiscT === b.civ.firstDiscT && a.civ.kRngS === b.civ.kRngS, `discoveries ${a.civ.discoveries} vs ${b.civ.discoveries}`);
 check('restore: runtime-only state is reset sanely (orders cleared, builders free)', b.civ.oState.every(v => v === 0) && b.civ.vJob.every(v => v === -1) && b.civ.vState.every(v => v === 0));
 for (let i = 0; i < 400; i++) simStep(b);
 let fin = true; for (let i = 0; i < b.elev.length; i++) if (!Number.isFinite(b.elev[i]) || !Number.isFinite(b.water[i])) fin = false;
