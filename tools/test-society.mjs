@@ -10,6 +10,7 @@ import {
   N_IDEAS, IDEA_NAMES, IDEA_FARMING, IDEA_BRIDGES, IDEA_PATHS, IDEA_RITUAL, IDEA_SHELTER, IDEA_STORAGE, IDEA_WOOD, IDEA_STONE, knows,
 } from '../src/sim/knowhow.js';
 import { GRID_W } from '../src/sim/grid.js';
+import { TUNING } from '../src/sim/tuning.js';
 
 let failed = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
@@ -259,6 +260,42 @@ for (const seed of SEEDS5B) {
   check('5d new homes: built at the camp stage', newAt === newN, `${newAt} of ${newN} new homes at stage 2`);
   learn(IDEA_STONE);
   check('5d stage: Stonework makes stone houses (stage 3)', campStage(c, cp) === 3);
+}
+// 5d-2: the field mask (crop rows) is set only around healthy homes of camps that know Farming
+{
+  const w = mk(1337), c = w.civ;
+  while (w.stats.time < 1500) simStep(w);
+  let cp = 0; for (let k = 0; k < MAX_CAMPS; k++) if (c.cActive[k] && c.cHomes[k] > c.cHomes[cp]) cp = k;
+  const setFarm = () => {
+    for (let k = 0; k < MAX_CAMPS; k++) c.kAdopt[k * N_IDEAS + IDEA_FARMING] = k === cp ? 0.9 : 0;
+    c.kUsed[cp * N_IDEAS + IDEA_FARMING] = w.stats.time;
+  };
+  setFarm(); const t0 = w.stats.time;
+  while (w.stats.time - t0 < 3) { simStep(w); setFarm(); }
+  const R = TUNING.homeClearRadius + 20 / GRID_W, fd = w.field;
+  let set = 0, stray = 0, otherHomes = 0, nearOther = 0;
+  for (let i = 0; i < fd.length; i++) {
+    if (fd[i] <= 0) continue;
+    set++;
+    const x = (i % GRID_W + 0.5) / GRID_W * 20 - 10, z = ((i / GRID_W | 0) + 0.5) / GRID_W * 20 - 10;
+    let ok = false;
+    for (let s = 0; s < c.nS && !ok; s++) {
+      if (c.sKind[s] !== 0 || c.sDecay[s] > 0.4 || c.sCamp[s] !== cp) continue;
+      if (Math.hypot(c.sX[s] - x, c.sZ[s] - z) <= R) ok = true;
+    }
+    if (!ok) stray++;
+  }
+  for (let s = 0; s < c.nS; s++) {   // a home of a non-Farming camp far from any farming home must have no field
+    if (c.sKind[s] !== 0 || c.sDecay[s] > 0.4 || c.sCamp[s] === cp) continue;
+    let far = true;
+    for (let t = 0; t < c.nS; t++) if (c.sKind[t] === 0 && c.sDecay[t] <= 0.4 && c.sCamp[t] === cp && Math.hypot(c.sX[t] - c.sX[s], c.sZ[t] - c.sZ[s]) < 2 * R) far = false;
+    if (!far) continue;
+    otherHomes++;
+    const gx = Math.round((c.sX[s] + 10) / 20 * GRID_W - 0.5), gz = Math.round((c.sZ[s] + 10) / 20 * GRID_W - 0.5);
+    if (fd[gz * GRID_W + gx] > 0) nearOther++;
+  }
+  check('5d-2 field mask: set only around healthy homes of Farming camps', set > 0 && stray === 0 && nearOther === 0,
+    `${set} cells set, ${stray} away from Farming homes, ${nearOther} of ${otherHomes} other camps' homes farmed`);
 }
 
 // 5c-1 and long-run checks: no Mason work before Bridges or Paths is known somewhere; every work opens for a camp that

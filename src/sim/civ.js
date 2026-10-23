@@ -758,7 +758,8 @@ function secondTick(world) {
   // Farming is known, and before that a smaller patch is trampled to grass (without this, forest grows right up to
   // the doors, since settlements sit on the most fertile ground)
   {
-    const bm = world.biomass, townFarm = (civ.gates & GATE_FARM) !== 0;
+    const bm = world.biomass, fd = world.field, townFarm = (civ.gates & GATE_FARM) !== 0;
+    fd.fill(0);   // 5d-2: the field mask (crop rows) is rebuilt from the farming homes each second
     for (let s = 0; s < civ.nS; s++) {
       if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] > 0.4) continue;
       const farm = civ.societyOn === 1 ? knows(civ, civ.sCamp[s], IDEA_FARMING) : townFarm;   // 5c: per camp
@@ -772,6 +773,7 @@ function secondTick(world) {
         if (d > R) continue;
         const i = z * GRID_W + x, lim = LVL + (1 - LVL) * (d / R) * (d / R);
         if (bm[i] > lim) bm[i] -= (bm[i] - lim) * 0.25;
+        if (farm) { const fv = Math.min(1, (R - d) / (0.45 * R)); if (fv > fd[i]) fd[i] = fv; }
       }
     }
   }

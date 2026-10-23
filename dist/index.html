@@ -214,6 +214,21 @@ const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
   col *= 1.0 - 0.4 * max(cav, 0.0);
   col += 0.05 * max(-cav, 0.0);
 
+  // 5d-2 crop rows: furrows on farmed land (field mask in texC.a). Rows follow the contours on slopes; on flat
+  // ground, where contours spread out, a slowly turning straight-row term takes over.
+  float fieldM = fetchBil(uSimTexC, vSimUv).a * (1.0 - steep) * (1.0 - smoothstep(0.004, 0.02, tA.g));
+  if (fieldM > 0.01) {
+    vec2 eg = vec2(simA(vSimUv + vec2(tx, 0.0)).r - simA(vSimUv - vec2(tx, 0.0)).r,
+                   simA(vSimUv + vec2(0.0, tx)).r - simA(vSimUv - vec2(0.0, tx)).r) / (2.0 * tx * 20.0);
+    float flatW = 1.0 - smoothstep(0.15, 0.35, length(eg));
+    float ang = vnoise(vWP.xz * 0.25) * 3.1416;
+    float fu = elevF * 70.0 + dot(vWP.xz, vec2(cos(ang), sin(ang))) * 11.0 * flatW;
+    float rowFade = 1.0 - smoothstep(0.3, 0.7, fwidth(fu));
+    float row = mix(0.5, 0.5 + 0.5 * cos(6.2832 * fu), rowFade);
+    vec3 furrowC = mix(lin(vec3(0.34, 0.23, 0.14)), lin(vec3(0.72, 0.63, 0.28)), row);
+    col = mix(col, furrowC, fieldM * 0.85);
+  }
+
   // wet shoreline / soaked soil
   float wetTerr = clamp(tA.g * 14.0 + tB.r * 0.6, 0.0, 1.0);
   col *= (1.0 - 0.45 * wetTerr) * (1.0 - 0.16 * uWet);
@@ -501,7 +516,7 @@ const CELL_SIZE = WORLD_SIZE / GRID_W;
 function createSimTextures(floatLinear) {
   const bufA = new Float32Array(GRID_N * 4);
   const bufB = new Float32Array(GRID_N * 4);
-  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows), G = sediment, B = biomass (vegetation)
+  const bufC = new Float32Array(GRID_N * 4);   // R = sun shade (heightfield shadows), G = sediment, B = biomass (vegetation), A = field (5d-2)
   const filter = floatLinear ? THREE.LinearFilter : THREE.NearestFilter;
   const make = (buf) => {
     const t = new THREE.DataTexture(buf, GRID_W, GRID_H, THREE.RGBAFormat, THREE.FloatType);
@@ -532,8 +547,9 @@ function packShadeTexture(world, st) {
   // biomass rides along on the shade sweep's upload (~every 16 frames): it changes over minutes, and packing it
   // every frame would re-upload the whole 256 KB texture each frame
   // sediment (G) rides along too: the water shader tints silty floodwater; plumes move slowly enough for this cadence
-  const bm = world.biomass, sd = world.sediment;
-  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) { c[j] = sh[i]; c[j + 1] = sd[i]; c[j + 2] = bm[i]; }
+  // the field mask (A) is rebuilt at 1 Hz, so this cadence is plenty
+  const bm = world.biomass, sd = world.sediment, fd = world.field;
+  for (let i = 0, j = 0; i < GRID_N; i++, j += 4) { c[j] = sh[i]; c[j + 1] = sd[i]; c[j + 2] = bm[i]; c[j + 3] = fd[i]; }
   st.texC.needsUpdate = true;
 }
 
@@ -1761,12 +1777,16 @@ function createWaterfalls(world) {
     cellSector[k] = Math.min(SECTORS - 1, Math.floor(a / (Math.PI * 2) * SECTORS));
   }
   const sums = new Float32Array(SECTORS);
+  let first = true;
 
   mesh.userData.update = function update(w, dt) {
     sums.fill(0);
     const rim = w.rimCells, out = w.rimOut;
     for (let k = 0; k < rim.length; k++) sums[cellSector[k]] += out[rim[k]];
-    const a = 1 - Math.exp(-dt / 0.6);
+    // the first update starts at full flow: easing in from 0 made frame 1 depend on how long it took (the smoke
+    // check counts programs at frame 1 and missed the waterfall's when that frame was quick)
+    const a = first ? 1 : 1 - Math.exp(-dt / 0.6);
+    first = false;
     let any = 0;
     for (let s = 0; s < SECTORS; s++) {
       const target = Math.pow(Math.min(1, sums[s] / 0.006), 0.6);       // 0.006 ~ the strongest sector's mean outflow per substep
@@ -2023,13 +2043,17 @@ const GLSL_VILL_POS = /* glsl */`
   }
   vec3 transformed = lp;
   vec3 cloakC = role < 0.5 ? vec3(0.36, 0.50, 0.24) : role < 1.5 ? vec3(0.62, 0.46, 0.26) : role < 2.5 ? vec3(0.34, 0.42, 0.58) : vec3(0.50, 0.30, 0.66);
+  // 5d-2: role colours grow more saturated with camera distance, so groups still read at island zoom
+  float camD = length(cameraPosition - (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz);
+  float rLum = dot(cloakC, vec3(0.3, 0.59, 0.11));
+  vec3 roleC = clamp(vec3(rLum) + (cloakC - vec3(rLum)) * (1.0 + 1.3 * smoothstep(12.0, 40.0, camD)), 0.0, 1.0);
   float hh = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.547);
   vec3 hideC = mix(vec3(0.46, 0.33, 0.21), vec3(0.66, 0.52, 0.36), hh);   // hides: tan to dark brown per person
-  cloakC = mix(hideC, cloakC, cloaked);
+  cloakC = mix(hideC, roleC, cloaked);
   vec3 vc = cloakC * (0.8 + 0.3 * vyn);
   vec3 vg = vec3(0.0);
   if (abs(vpid - 1.0) < 0.5) vc = vec3(0.86, 0.70, 0.56);
-  else if (abs(vpid - 2.0) < 0.5) vc = cloakC * 0.7;
+  else if (abs(vpid - 2.0) < 0.5) vc = mix(roleC * 0.85, cloakC * 0.7, cloaked);   // hide-wearers: role-coloured head wrap
   else if (abs(vpid - 3.0) < 0.5) vc = cargoKind < 0.5 ? vec3(0.55, 0.40, 0.22) : cargoKind < 1.5 ? vec3(0.36, 0.22, 0.11) : vec3(0.58, 0.58, 0.62);
   else if (abs(vpid - 5.0) < 0.5 || abs(vpid - 7.0) < 0.5) vc = vec3(0.20, 0.15, 0.10);
   else if (abs(vpid - 6.0) < 0.5) vc = vec3(0.66, 0.50, 0.27);
@@ -3625,7 +3649,8 @@ function secondTick(world) {
   // Farming is known, and before that a smaller patch is trampled to grass (without this, forest grows right up to
   // the doors, since settlements sit on the most fertile ground)
   {
-    const bm = world.biomass, townFarm = (civ.gates & GATE_FARM) !== 0;
+    const bm = world.biomass, fd = world.field, townFarm = (civ.gates & GATE_FARM) !== 0;
+    fd.fill(0);   // 5d-2: the field mask (crop rows) is rebuilt from the farming homes each second
     for (let s = 0; s < civ.nS; s++) {
       if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] > 0.4) continue;
       const farm = civ.societyOn === 1 ? knows(civ, civ.sCamp[s], IDEA_FARMING) : townFarm;   // 5c: per camp
@@ -3639,6 +3664,7 @@ function secondTick(world) {
         if (d > R) continue;
         const i = z * GRID_W + x, lim = LVL + (1 - LVL) * (d / R) * (d / R);
         if (bm[i] > lim) bm[i] -= (bm[i] - lim) * 0.25;
+        if (farm) { const fv = Math.min(1, (R - d) / (0.45 * R)); if (fv > fd[i]) fd[i] = fv; }
       }
     }
   }
@@ -4347,13 +4373,36 @@ const GLSL_FLORA_VERT_POS = /* glsl */`
   // ~70% in old forest); the per-tuft hash decides which ones, and each tree grows in over a short biomass range
   float treeFrac = mix(0.04, 0.7, smoothstep(0.6, 0.95, fC.b));   // crops (biomass < 0.6) stay open fields
   float treeAmt = smoothstep(1.0 - treeFrac, 1.0 - treeFrac + 0.06, arche);
-  float vis = part > 0.25 ? treeAmt : 1.0;
+  float fieldF = fC.a;   // 5d-2: farmed land grows no trees, only an even golden crop
+  float vis = part > 0.25 ? treeAmt * (1.0 - smoothstep(0.2, 0.4, fieldF)) : 1.0;
+  // 5d-2 species by ground (spec 6.1): conifer on high or steep ground, flat-top scrub on dry ground, else broadleaf.
+  // A per-tree jitter mixes them at the borders. The crown's vertices are reshaped, so the mesh does not grow.
+  float sp = 0.0;   // 0 broadleaf, 1 conifer, 2 scrub
+  vec3 fp = position;
+  if (part > 0.25) {
+    float cs = 1.0 / 128.0;
+    vec2 eg = vec2(texture(uSimTexA, fUv + vec2(cs, 0.0)).r - texture(uSimTexA, fUv - vec2(cs, 0.0)).r,
+                   texture(uSimTexA, fUv + vec2(0.0, cs)).r - texture(uSimTexA, fUv - vec2(0.0, cs)).r);
+    float slope = length(eg) * ${glslF(128 / 40)};
+    float jit = hash12(fBase.xz * 7.13) - 0.5;
+    float conS = max(smoothstep(0.62, 0.78, fA.r), smoothstep(0.22, 0.45, slope)) + jit * 0.5;
+    float dryS = max(smoothstep(0.48, 0.36, fB.r), smoothstep(0.55, 0.35, fert)) + jit * 0.5;
+    sp = conS > 0.5 ? 1.0 : dryS > 0.5 ? 2.0 : 0.0;
+    if (sp > 0.5 && sp < 1.5) {          // conifer: narrow cone, widest low down
+      if (part >= 0.75) fp = yn > 0.9 ? vec3(0.0, 1.18, 0.0) : yn > 0.75 ? vec3(fp.x * 0.62, 0.34, fp.z * 0.62) : vec3(0.0, 0.24, 0.0);
+    } else if (sp > 1.5) {               // flat-top scrub: wide thin crown on a taller, thinner trunk
+      if (part >= 0.75) fp = yn > 0.9 ? vec3(0.0, 0.74, 0.0) : yn > 0.75 ? vec3(fp.x * 1.4, 0.66, fp.z * 1.4) : vec3(0.0, 0.6, 0.0);
+      else fp = vec3(fp.x * 0.75, fp.y * 1.45, fp.z * 0.75);
+    }
+  }
   float hgt = mix(0.22, 1.0, smoothstep(0.08, 0.85, fert)) * grow * (1.0 - 0.8 * comp) * (0.8 + 0.5 * arche);
+  if (sp > 1.5) hgt *= 0.8;
+  if (part < 0.25) hgt = mix(hgt, 0.55, fieldF);
   hgt *= 1.0 - smoothstep(0.015, 0.04, wat);
   float wid = mix(0.6, 1.0, hgt);
   // blades and tree parts are sized separately (SIZE in scale.js): short grass, trees well above the cottages
   vec2 pS = part > 0.25 ? vec2(${glslF(SIZE.treeXZ)}, ${glslF(SIZE.treeY)}) : vec2(${glslF(SIZE.grassXZ)}, ${glslF(SIZE.grassY)});
-  vec3 transformed = position * vec3(wid * pS.x, hgt * pS.y, wid * pS.x) * vis;
+  vec3 transformed = fp * vec3(wid * pS.x, hgt * pS.y, wid * pS.x) * vis;
 
   float t = uTime;
   float gust = 0.5 + 0.5 * sin(t * 0.7 + fBase.x * 0.35 + fBase.z * 0.21);
@@ -4378,7 +4427,8 @@ const GLSL_FLORA_VERT_POS = /* glsl */`
   vec3 fc = mix(ochre, grain, smoothstep(0.22, 0.38, fert));
   fc = mix(fc, emer, smoothstep(0.48, 0.68, fert));
   if (part > 0.25 && part < 0.75) fc = lin(vec3(0.35, 0.24, 0.15));
-  else if (part >= 0.75) fc = mix(emer, fc, 0.35);
+  else if (part >= 0.75) fc = sp > 1.5 ? lin(vec3(0.46, 0.48, 0.20)) : sp > 0.5 ? lin(vec3(0.10, 0.34, 0.27)) : mix(emer, fc, 0.35);
+  if (part < 0.25) fc = mix(fc, grain, fieldF);
   float hv = hash12(fBase.xz * 13.7);
   fc *= (0.82 + 0.36 * hv) * mix(0.55, 1.18, yn);
   float lum = smoothstep(0.32, 0.52, bias);
@@ -5009,6 +5059,7 @@ function createWorld(seed) {
     sedTmp: f(),                         // scratch for sediment advection
     ecoTmp: f(),                         // scratch for ecology diffusion
     biomass: f(),                        // standing vegetation 0..1 (grass -> crops -> forest), saved
+    field: f(),                          // farmed land 0..1 around Farming homes (5d-2; runtime only, rebuilt at 1 Hz)
     pathField: { field: f(), scratch: f(), cost: f(), phase: 0, ready: false, sources: 0, skip: false },   // walking effort to the nearest healthy home (runtime-only)
     shade: new Float32Array(GRID_N).fill(1),   // sun shadow factor from the heightfield (runtime only)
     soil: f(),                           // fixed soil quality 0.55..1.45 (regenerated from the seed, not saved)

@@ -82,12 +82,16 @@ export function createWaterfalls(world) {
     cellSector[k] = Math.min(SECTORS - 1, Math.floor(a / (Math.PI * 2) * SECTORS));
   }
   const sums = new Float32Array(SECTORS);
+  let first = true;
 
   mesh.userData.update = function update(w, dt) {
     sums.fill(0);
     const rim = w.rimCells, out = w.rimOut;
     for (let k = 0; k < rim.length; k++) sums[cellSector[k]] += out[rim[k]];
-    const a = 1 - Math.exp(-dt / 0.6);
+    // the first update starts at full flow: easing in from 0 made frame 1 depend on how long it took (the smoke
+    // check counts programs at frame 1 and missed the waterfall's when that frame was quick)
+    const a = first ? 1 : 1 - Math.exp(-dt / 0.6);
+    first = false;
     let any = 0;
     for (let s = 0; s < SECTORS; s++) {
       const target = Math.pow(Math.min(1, sums[s] / 0.006), 0.6);       // 0.006 ~ the strongest sector's mean outflow per substep

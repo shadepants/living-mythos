@@ -102,6 +102,21 @@ export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
   col *= 1.0 - 0.4 * max(cav, 0.0);
   col += 0.05 * max(-cav, 0.0);
 
+  // 5d-2 crop rows: furrows on farmed land (field mask in texC.a). Rows follow the contours on slopes; on flat
+  // ground, where contours spread out, a slowly turning straight-row term takes over.
+  float fieldM = fetchBil(uSimTexC, vSimUv).a * (1.0 - steep) * (1.0 - smoothstep(0.004, 0.02, tA.g));
+  if (fieldM > 0.01) {
+    vec2 eg = vec2(simA(vSimUv + vec2(tx, 0.0)).r - simA(vSimUv - vec2(tx, 0.0)).r,
+                   simA(vSimUv + vec2(0.0, tx)).r - simA(vSimUv - vec2(0.0, tx)).r) / (2.0 * tx * 20.0);
+    float flatW = 1.0 - smoothstep(0.15, 0.35, length(eg));
+    float ang = vnoise(vWP.xz * 0.25) * 3.1416;
+    float fu = elevF * 70.0 + dot(vWP.xz, vec2(cos(ang), sin(ang))) * 11.0 * flatW;
+    float rowFade = 1.0 - smoothstep(0.3, 0.7, fwidth(fu));
+    float row = mix(0.5, 0.5 + 0.5 * cos(6.2832 * fu), rowFade);
+    vec3 furrowC = mix(lin(vec3(0.34, 0.23, 0.14)), lin(vec3(0.72, 0.63, 0.28)), row);
+    col = mix(col, furrowC, fieldM * 0.85);
+  }
+
   // wet shoreline / soaked soil
   float wetTerr = clamp(tA.g * 14.0 + tB.r * 0.6, 0.0, 1.0);
   col *= (1.0 - 0.45 * wetTerr) * (1.0 - 0.16 * uWet);

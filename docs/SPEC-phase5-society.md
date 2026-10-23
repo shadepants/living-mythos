@@ -5,7 +5,7 @@ Version: 1.0
 Status: Approved
 Owner: Jordan
 Created: 2026-10-22
-Last Updated: 2026-10-22
+Last Updated: 2026-10-23
 Approvers: Jordan
 ---
 
@@ -240,7 +240,7 @@ camp's villagers become its Masons.
   silhouettes.
 - **Budget:** villager mesh ≤ 2× today's vertex count; phone fps average ≥ 50.
 
-### 6.1 5d-2 design (agreed with Jordan 2026-10-22; not built yet)
+### 6.1 5d-2 design (agreed with Jordan 2026-10-22; built 2026-10-23, see v1.4)
 - **Trees, three species by ground**, chosen in the flora vertex shader from data it already samples (elevation,
   slope, fertility, moisture) plus the per-tuft hash, so neighbours mix at the borders:
   - broadleaf (today's crown) on fertile lowland;
@@ -315,6 +315,29 @@ Seeds for the multi-seed tests: 1337, 7, 4242 (5a); add 99 and 2026 for 5b and 5
 - Weather (atmosphere) is render-side only, so the sim cannot use it. Shelter's need uses soil moisture and floods instead.
 
 ## Changelog
+
+### v1.4 - 2026-10-23 (5d-2 built: tree species, crop rows, role colours)
+- Trees: the flora vertex shader picks a species per tree from elevation, slope, moisture and fertility plus a
+  per-tree jitter: conifer (narrow dark blue-green cone) on high or steep ground, flat-top scrub (wide olive crown,
+  taller thinner trunk, 0.8x height) on dry or poor ground, else broadleaf. Only the crown and trunk vertices move;
+  the flora mesh stays 108 vertices (`test-geo` check).
+  Observed: scrub is rare, because dry or poor ground carries almost no biomass, so few trees stand there to
+  show it (one flat-top in the 2,500 s reference frame). Left as is pending Jordan's call.
+- Fields: `world.field` (runtime only, not saved) is rebuilt in the 1 Hz home-clearing pass: 1 out to 55% of
+  `homeClearRadius` around a healthy home whose camp knows Farming (the town: `GATE_FARM`), fading to 0 at the edge.
+  It rides in `texC.a` on the biomass upload. The terrain shader draws furrows there; field tufts are even-height
+  golden crop and grow no trees. Interpretation: rows follow the contours only on real slopes (gradient above
+  ~0.15-0.35); on gentler ground they run straight in a slowly turning direction, because contour stripes on bumpy
+  lowland made swirly "fingerprint" patterns in the frames. Rows fade to a flat tone where they would alias.
+- Villagers: role colours (green forager, tan hauler, blue Mason, purple Mystic) gain up to 2.3x saturation from
+  12 to 40 units of camera distance. Hide-wearers (camp stage 0-1) wear a role-coloured head wrap: the existing
+  hood part, recoloured, so the mesh stays 456 vertices.
+- No `world.rng` use; the field mask is render-only and does not feed the sim.
+- Tests: `test-geo` flora vertex count; `test-society` field mask set only around Farming camps' healthy homes.
+- Fix (found by the 5d-2 verify run): the smoke check counts shader programs at frame 1, and waterfalls eased in
+  from zero over ~0.6 s of real time, so a quick first frame drew no waterfall and counted 10 programs instead of 11
+  (3 of 5 runs right after the long suite; proven by hiding the waterfall at frame 1, which gives exactly 10). The
+  waterfall's first update now starts at full flow, so frame 1 no longer depends on timing.
 
 ### v1.3 - 2026-10-22 (5d-1 built: homes and villagers by stage)
 - 5d is split in two (Jordan, 2026-10-22): 5d-1 homes and villagers (this entry); 5d-2 richer trees, crop rows and

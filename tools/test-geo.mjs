@@ -4,6 +4,7 @@ import { createGridGeometry, createBasaltSkirt } from '../src/gl/terrain.js';
 import { createAtmosphere } from '../src/gl/atmo.js';
 import { SHARED } from '../src/gl/shared.js';
 import { createVillagerGeometry } from '../src/gl/villagers.js';
+import { createFloraGeometry } from '../src/gl/flora.js';
 
 let failed = 0;
 const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${d ? '  — ' + d : ''}`); if (!ok) failed++; };
@@ -72,6 +73,11 @@ const check = (name, ok, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${na
 { // spec 6 budget: the villager mesh stays within 2x its 5c vertex count (288) with the role tools added
   const n = createVillagerGeometry().attributes.position.count;
   check('villager mesh within 2x the 5c vertex count', n > 288 && n <= 576, `${n} vertices`);
+}
+
+{ // spec 6.1: tree species reshape the crown's vertices in the shader, so the flora mesh does not grow
+  const n = createFloraGeometry().attributes.position.count;
+  check('flora mesh unchanged by tree species (108 vertices)', n === 108, `${n} vertices`);
 }
 
 if (failed) { console.error(`${failed} geometry test(s) failed`); process.exit(1); }

@@ -241,13 +241,17 @@ export const GLSL_VILL_POS = /* glsl */`
   }
   vec3 transformed = lp;
   vec3 cloakC = role < 0.5 ? vec3(0.36, 0.50, 0.24) : role < 1.5 ? vec3(0.62, 0.46, 0.26) : role < 2.5 ? vec3(0.34, 0.42, 0.58) : vec3(0.50, 0.30, 0.66);
+  // 5d-2: role colours grow more saturated with camera distance, so groups still read at island zoom
+  float camD = length(cameraPosition - (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz);
+  float rLum = dot(cloakC, vec3(0.3, 0.59, 0.11));
+  vec3 roleC = clamp(vec3(rLum) + (cloakC - vec3(rLum)) * (1.0 + 1.3 * smoothstep(12.0, 40.0, camD)), 0.0, 1.0);
   float hh = fract(sin(float(gl_InstanceID) * 12.9898) * 43758.547);
   vec3 hideC = mix(vec3(0.46, 0.33, 0.21), vec3(0.66, 0.52, 0.36), hh);   // hides: tan to dark brown per person
-  cloakC = mix(hideC, cloakC, cloaked);
+  cloakC = mix(hideC, roleC, cloaked);
   vec3 vc = cloakC * (0.8 + 0.3 * vyn);
   vec3 vg = vec3(0.0);
   if (abs(vpid - 1.0) < 0.5) vc = vec3(0.86, 0.70, 0.56);
-  else if (abs(vpid - 2.0) < 0.5) vc = cloakC * 0.7;
+  else if (abs(vpid - 2.0) < 0.5) vc = mix(roleC * 0.85, cloakC * 0.7, cloaked);   // hide-wearers: role-coloured head wrap
   else if (abs(vpid - 3.0) < 0.5) vc = cargoKind < 0.5 ? vec3(0.55, 0.40, 0.22) : cargoKind < 1.5 ? vec3(0.36, 0.22, 0.11) : vec3(0.58, 0.58, 0.62);
   else if (abs(vpid - 5.0) < 0.5 || abs(vpid - 7.0) < 0.5) vc = vec3(0.20, 0.15, 0.10);
   else if (abs(vpid - 6.0) < 0.5) vc = vec3(0.66, 0.50, 0.27);

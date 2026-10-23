@@ -21,6 +21,7 @@ export function createWorld(seed) {
     sedTmp: f(),                         // scratch for sediment advection
     ecoTmp: f(),                         // scratch for ecology diffusion
     biomass: f(),                        // standing vegetation 0..1 (grass -> crops -> forest), saved
+    field: f(),                          // farmed land 0..1 around Farming homes (5d-2; runtime only, rebuilt at 1 Hz)
     pathField: { field: f(), scratch: f(), cost: f(), phase: 0, ready: false, sources: 0, skip: false },   // walking effort to the nearest healthy home (runtime-only)
     shade: new Float32Array(GRID_N).fill(1),   // sun shadow factor from the heightfield (runtime only)
     soil: f(),                           // fixed soil quality 0.55..1.45 (regenerated from the seed, not saved)
