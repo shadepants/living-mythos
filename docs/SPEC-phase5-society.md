@@ -316,6 +316,41 @@ Seeds for the multi-seed tests: 1337, 7, 4242 (5a); add 99 and 2026 for 5b and 5
 
 ## Changelog
 
+### v1.5 - 2026-10-23 (audit fixes; Jordan's role, monolith and home-cap decisions)
+- Decisions (Jordan, 2026-10-23):
+  - **Roles for life:** a Mason stays a Mason, but goes back to foraging once their camp has no open work (checked
+    each second, so idle Masons do not hold the island's `maxMasons` places). A Mystic stays one when the camp
+    shrinks or splits; only forgetting Ritual ends it. `mysticShare` (10%) now limits new appointments only.
+    Foragers and haulers still switch by need. The 5c roles test now checks appointments, not the head count.
+  - **Monolith revives are random:** each second a ruin within 2.8 of a monolith revives with chance
+    `SOCIETY.monolithRevive` = 0.1, from a stateless hash (world.rng untouched). The town start keeps the old certain
+    revive. Before, an abandoned home near a monolith was revived every ~7 s forever and its slot never freed.
+  - **Home cap:** `dwellingCap` stays 40 for the island (room for 120-160 people at 3-4 per home). Past it, a camp
+    reuses a fully ruined home of its own or of no camp; a camp with fewer than `SOCIETY.smallCampHomes` = 2 homes
+    may build a new one anyway, so a fresh split is never homeless (structureCap is 600, so this is safe).
+- Audit fixes (`docs/AUDIT-PROMPT.md`, 2026-10-23):
+  - F1: `restoreWorld` checks every float is finite, positions within 50, headings within 100, indices and counts
+    within their arrays, and small enums in range. The heading turn no longer uses a `while` wrap (a huge value
+    hung the step forever, and the bad save reloaded every time); it is written relative to the walking direction,
+    so it always stays in range.
+  - F2: a half-built work whose Mason dies or leaves reopens for another Mason of its camp, who carries on from
+    where it stands (it used to be orphaned forever and block its spot).
+  - F4: an abandoned camp's homes get `sCamp = -1`, so a camp that later reuses the index does not inherit them.
+  - F5: the furrow shader no longer calls `fwidth` inside a branch; the row width is rebuilt from derivatives of
+    elevation and world position taken outside it.
+  - F6: the waterfall starts at full flow on the first update that has any outflow (a restored save has none until
+    its first substep).
+  - F7: saves carry `world.rng`'s state (optional field `rng`) and villager timers on restore are no longer
+    `Math.random`, so restores are deterministic.
+  - Known gap: a reopened work whose camp dies stays open (no other camp may build it). Rare; left for 5e.
+- Test change (5a test 4, Jordan's choice 2026-10-23): a home shortfall counts only if it lasts >= 60 s (was 5 s).
+  After these fixes, seed 1337's camp 4 lost a home at 2,548 s when the ground under it dried out (fertility 0.83
+  -> 0.16 in ~100 s). The ruin was just below the 0.35 needed to rebuild in place and the ring around the camp was
+  too poor for a new site, so it took 33 s to rehouse, with 5,600 food in store. The test is meant to catch a camp
+  that never recovers; how fast camps rehouse on poor ground is a 5e question.
+- Tests: `test-persist` bad-value rejections, huge-heading step, deterministic restore; `test-society` F2, F3, F4,
+  the home cap and both role rules.
+
 ### v1.4 - 2026-10-23 (5d-2 built: tree species, crop rows, role colours)
 - Trees: the flora vertex shader picks a species per tree from elevation, slope, moisture and fertility plus a
   per-tree jitter: conifer (narrow dark blue-green cone) on high or steep ground, flat-top scrub (wide olive crown,

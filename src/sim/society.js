@@ -24,6 +24,8 @@ const S = {
   campClearRadius: 1.0, campClearLevel: 0.15,   // trampled grass around homes before Farming (civ secondTick)
   shelterHousehold: 4, farmCap: 1.5, storeCap: 1.25, spoilRate: 0.005, mysticShare: 0.1,   // 5c unlocks (spec 5)
   upgradeGap: 60,   // 5d: a camp rebuilds at most one older home to its current stage per minute (spec 6)
+  monolithRevive: 0.1,   // chance per second that a monolith revives a nearby ruin (Jordan, 2026-10-23)
+  smallCampHomes: 2,     // a camp with fewer homes may build past the island's dwellingCap (Jordan, 2026-10-23)
 };
 export const SOCIETY = Object.freeze(S);
 
@@ -111,8 +113,9 @@ function newCamp(world, x, z, food) {
   return c;
 }
 
-// place a dwelling for camp c (reusing a fully ruined slot of an abandoned camp once the cap is reached)
-function addHome(world, c, x, z, build) {
+// place a dwelling for camp c (reusing a fully ruined slot of an abandoned camp, or its own, once the cap is
+// reached; a camp with fewer than smallCampHomes homes may still build a new one, so a fresh split is never homeless)
+export function addHome(world, c, x, z, build) {
   const civ = world.civ;
   let s = -1;
   if (civ.dwellings >= TUNING.dwellingCap) {
@@ -122,6 +125,8 @@ function addHome(world, c, x, z, build) {
       if (oc >= 0 && civ.cActive[oc] === 1 && oc !== c) continue;
       s = k; break;
     }
+  }
+  if (civ.dwellings >= TUNING.dwellingCap && (s >= 0 || civ.cHomes[c] >= S.smallCampHomes)) {
     if (s < 0) return -1;
     civ.sX[s] = x; civ.sZ[s] = z; civ.sDecay[s] = 0; civ.sLum[s] = 0; civ.sEpoch++;
   } else {
@@ -229,11 +234,12 @@ function recount(world) {
     if (homeHealthy(civ, h) && civ.sCamp[h] === c) civ.hCount[h]++;
   }
   civ.nAlive = n;
-  // Mystics need Ritual and stay within a tenth of the camp (5c): a camp that forgot Ritual, shrank or split loses its surplus
+  // Mystics need Ritual (5c). A Mystic is one for life (Jordan, 2026-10-23): a camp that shrinks or splits keeps
+  // them, and the tenth-of-the-camp share only limits new appointments (civ decide)
   for (let v = 0; v < civ.nV; v++) {
     if (civ.vAlive[v] === 0 || civ.vRole[v] !== 3 /* ROLE_MYSTIC */) continue;
     const c = civ.vCamp[v];
-    if (c >= 0 && knows(civ, c, IDEA_RITUAL) && civ.cMyst[c] <= Math.floor(civ.cPop[c] * S.mysticShare)) continue;
+    if (c >= 0 && knows(civ, c, IDEA_RITUAL)) continue;
     civ.vRole[v] = 0; if (c >= 0) civ.cMyst[c]--;
   }
   // homeless (home ruined, or belongs to another camp): move into the roomiest home of their own camp
@@ -350,7 +356,11 @@ export function societyTick(world) {
   for (let c = 0; c < MAX_CAMPS; c++) {
     if (civ.cActive[c] === 0) continue;
     const pop = civ.cPop[c];
-    if (pop === 0) { civ.cActive[c] = 0; continue; }   // abandoned: its homes ruin on their own (civ secondTick)
+    if (pop === 0) {   // abandoned: its homes ruin on their own (civ secondTick) and belong to no camp, so a camp
+      civ.cActive[c] = 0;   // that later reuses this index does not inherit (and walk across the island to) them
+      for (let s = 0; s < civ.nS; s++) if (civ.sKind[s] === 0 && civ.sCamp[s] === c) civ.sCamp[s] = -1;
+      continue;
+    }
     // a settling party that cannot reach its site founds the camp where its first member stands
     if (civ.cHomeSlot[c] < 0 && t - civ.cFounded[c] > S.settleGiveUp) {
       for (let v = 0; v < civ.nV; v++) if (civ.vAlive[v] === 1 && civ.vCamp[v] === c) { settleArrive(world, v); break; }

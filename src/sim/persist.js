@@ -43,6 +43,7 @@ export function serializeWorld(world, extra) {
   for (const k of CIV_OPT_U8) out.c[k] = toB64(civ[k]);
   for (const k of CIV_OPT_F32) out.c[k] = toB64(civ[k]);
   for (const k of CIV_NUM) out.n[k] = civ[k];
+  out.rng = world.rng.s;   // optional: a restore then continues the same random sequence
   return JSON.stringify(out);
 }
 
@@ -73,7 +74,27 @@ export function restoreWorld(world, text) {
     for (const k of CIV_NUM) if (typeof data.n[k] !== 'number' || !Number.isFinite(data.n[k])) return { ok: false };
   } catch (e) { return { ok: false }; }
   // sanity: elevations and fertility must be finite and in range before we trust the data
+  // bounds: one bad number used to load fine and then hang the page (a huge heading) or spread NaN island-wide,
+  // and autosave never replaced the bad save. Every float must be finite; indices and counts must fit their arrays
+  const nSCap = civ.sX.length, nVCap = civ.vX.length, nMCap = civ.mX.length, nCCap = civ.cX.length;
+  const n = data.n;
+  if (n.nS < 0 || n.nS > nSCap || n.nM < 0 || n.nM > nMCap || n.dwellings < 0 || n.dwellings > n.nS ||
+      n.nAlive < 0 || n.nAlive > nVCap || n.masons < 0 || n.masons > nVCap || (n.societyOn !== 0 && n.societyOn !== 1)) return { ok: false };
+  if (data.rng !== undefined && !(Number.isInteger(data.rng) && data.rng >= 0 && data.rng <= 0xffffffff)) return { ok: false };
+  const POS = [civ.vX, civ.vZ, civ.vTX, civ.vTZ, civ.sX, civ.sZ, civ.mX, civ.mZ, civ.cX, civ.cZ];
+  const IDX = new Map([[civ.vHome, nSCap], [civ.vAux, nSCap], [civ.mStruct, nSCap], [civ.monoStruct, nSCap], [civ.cHomeSlot, nSCap],
+    [civ.vCamp, nCCap], [civ.sCamp, nCCap], [civ.cPop, nVCap + 1], [civ.cHomes, nSCap + 1]]);
+  const U8MAX = new Map([[civ.vRole, 3], [civ.vState, 12], [civ.sKind, 5], [civ.vAlive, 1], [civ.cActive, 1], [civ.sActive, 1]]);
   for (const [target, src] of staged) {
+    if (src instanceof Float32Array) {
+      for (let i = 0; i < src.length; i++) if (!Number.isFinite(src[i])) return { ok: false };
+      if (POS.includes(target)) { for (let i = 0; i < src.length; i++) if (Math.abs(src[i]) > 50) return { ok: false }; }
+      if (target === civ.vHeading) { for (let i = 0; i < src.length; i++) if (Math.abs(src[i]) > 100) return { ok: false }; }
+    }
+    const top = IDX.get(target);
+    if (top !== undefined) { for (let i = 0; i < src.length; i++) if (src[i] < -1 || src[i] >= top) return { ok: false }; }
+    const um = U8MAX.get(target);
+    if (um !== undefined) { for (let i = 0; i < src.length; i++) if (src[i] > um) return { ok: false }; }
     if (target === world.elev) { for (let i = 0; i < GRID_N; i++) if (!Number.isFinite(src[i]) || src[i] > 10 || src[i] < -10) return { ok: false }; }
     if (target === civ.sStage) { for (let i = 0; i < src.length; i++) if (src[i] > 3) return { ok: false }; }
     if (target === world.fertility || target === world.biomass || target === civ.kAdopt) { for (let i = 0; i < src.length; i++) if (!(src[i] >= 0 && src[i] <= 1.0001)) return { ok: false }; }
@@ -84,11 +105,12 @@ export function restoreWorld(world, text) {
   for (const k of CIV_NUM) civ[k] = data.n[k];
   if (data.c.sStage === undefined) for (let s = 0; s < civ.nS; s++) if (civ.sKind[s] === 0) restage(civ, s);
   world.stats.time = data.time || 0;
+  if (data.rng !== undefined) world.rng.s = data.rng >>> 0;
   // runtime-only state that is not saved: orders restart, builders go home, unfinished works are considered done
   civ.oState.fill(0); civ.oWorker.fill(-1); civ.oStruct.fill(-1); civ.vJob.fill(-1);
   civ.oMat.fill(0); civ.oSupp.fill(0); civ.vSupply.fill(-1); civ.vCargoKind.fill(0);   // material runs restart too
   // settlers still walking out keep their state (only arrival founds their camp)
-  for (let v = 0; v < civ.nV; v++) { if (civ.vState[v] !== ST_SETTLE) civ.vState[v] = 0; civ.vTimer[v] = Math.random() * 1.5; civ.vVX[v] = 0; civ.vVZ[v] = 0; }
+  for (let v = 0; v < civ.nV; v++) { if (civ.vState[v] !== ST_SETTLE) civ.vState[v] = 0; civ.vTimer[v] = (v * 0.6180339) % 1 * 1.5; civ.vVX[v] = 0; civ.vVZ[v] = 0; }
   for (let s = 0; s < civ.nS; s++) if (civ.sKind[s] >= 2 && civ.sKind[s] <= 4 && civ.sBuild[s] < 1) civ.sBuild[s] = 1;
   world.vx.fill(0); world.vz.fill(0);
   world.fluxL.fill(0); world.fluxR.fill(0); world.fluxT.fill(0); world.fluxB.fill(0);

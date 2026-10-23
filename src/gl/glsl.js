@@ -105,13 +105,16 @@ export const GLSL_ISLAND_FRAG_COLOR = /* glsl */`
   // 5d-2 crop rows: furrows on farmed land (field mask in texC.a). Rows follow the contours on slopes; on flat
   // ground, where contours spread out, a slowly turning straight-row term takes over.
   float fieldM = fetchBil(uSimTexC, vSimUv).a * (1.0 - steep) * (1.0 - smoothstep(0.004, 0.02, tA.g));
+  // derivatives are taken outside the branch (undefined in non-uniform control flow); the row term's width is
+  // rebuilt from them inside: contour part from elevation, straight part from world position
+  float fwElev = fwidth(elevF) * 70.0, fwPos = length(fwidth(vWP.xz)) * 11.0;
   if (fieldM > 0.01) {
     vec2 eg = vec2(simA(vSimUv + vec2(tx, 0.0)).r - simA(vSimUv - vec2(tx, 0.0)).r,
                    simA(vSimUv + vec2(0.0, tx)).r - simA(vSimUv - vec2(0.0, tx)).r) / (2.0 * tx * 20.0);
     float flatW = 1.0 - smoothstep(0.15, 0.35, length(eg));
     float ang = vnoise(vWP.xz * 0.25) * 3.1416;
     float fu = elevF * 70.0 + dot(vWP.xz, vec2(cos(ang), sin(ang))) * 11.0 * flatW;
-    float rowFade = 1.0 - smoothstep(0.3, 0.7, fwidth(fu));
+    float rowFade = 1.0 - smoothstep(0.3, 0.7, fwElev + fwPos * flatW);
     float row = mix(0.5, 0.5 + 0.5 * cos(6.2832 * fu), rowFade);
     vec3 furrowC = mix(lin(vec3(0.34, 0.23, 0.14)), lin(vec3(0.72, 0.63, 0.28)), row);
     col = mix(col, furrowC, fieldM * 0.85);

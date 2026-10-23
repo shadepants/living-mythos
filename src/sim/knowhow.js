@@ -38,7 +38,7 @@ export function createKnowhowArrays() {
     kTrips: new Float32Array(KN_CAMPS), kFertSec: new Float32Array(KN_CAMPS), kRichSec: new Float32Array(KN_CAMPS),
     kFloodT: new Float32Array(KN_CAMPS).fill(-1e9),
     kFirst: new Uint8Array(N_IDEAS), discoveries: 0, firstDiscT: -1,
-    kRngS: 0,   // state of know-how's own random stream (0 = not started); saved, so restores stay deterministic
+    kRngS: 0,   // state of know-how's own random stream (0 = not started); saved, like world.rng's state, so a restore continues the same run
   };
 }
 

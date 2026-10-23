@@ -216,7 +216,7 @@ function decide(world, v) {
   if (civ.societyOn === 1 && role !== ROLE_MASON) {
     const ritual = knows(civ, camp, IDEA_RITUAL);
     const mystCap = Math.floor(civ.cPop[camp] * SOCIETY.mysticShare);
-    if (role === ROLE_MYSTIC && (!ritual || civ.cMyst[camp] > mystCap)) { role = ROLE_FORAGER; civ.cMyst[camp]--; }   // Ritual lost, or the camp shrank or split
+    if (role === ROLE_MYSTIC && !ritual) { role = ROLE_FORAGER; civ.cMyst[camp]--; }   // a Mystic for life (Jordan, 2026-10-23): only losing Ritual ends it; the share caps new Mystics
     if (role !== ROLE_MYSTIC) {
       if (ritual && !child && civ.cMyst[camp] < mystCap) { role = ROLE_MYSTIC; civ.cMyst[camp]++; }
       else role = child || (camp >= 0 && civ.cFood[camp] < 2 * SOCIETY.birthFood) || v % 3 !== 0 ? ROLE_FORAGER : ROLE_HAULER;
@@ -519,6 +519,13 @@ export function recordMyth(world, kind, x, z) {
   return slot;
 }
 
+// stateless 0..1 draw per (seed, second, structure, monolith), so monolith revives leave world.rng's sequence alone
+function reviveRoll(seed, t, s, k) {
+  let h = Math.imul(seed ^ 0x165667b1, 0x9e3779b1) ^ Math.imul(Math.floor(t) + 1, 0x85ebca6b) ^ Math.imul(s * 8 + k + 1, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d); h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
 export function reviveStructure(world, s) {
   const civ = world.civ;
   civ.sDecay[s] = 0; civ.sLum[s] = 1; civ.revived++;
@@ -695,10 +702,17 @@ function progressBuilds(world, dt) {
     const st = civ.oState[o];
     if (st !== 2 && st !== 3) continue;
     const w = civ.oWorker[o];
-    if (w < 0) { civ.oState[o] = 0; releaseOrderSuppliers(civ, o); continue; }
+    if (w < 0) {
+      // the worker died or left: a work already standing half-built reopens for another Mason (it used to be
+      // orphaned forever, blocking its spot); one not yet started just closes
+      if (st === 3 && civ.oStruct[o] >= 0) { civ.oState[o] = 1; continue; }
+      civ.oState[o] = 0; releaseOrderSuppliers(civ, o); continue;
+    }
     const dx = civ.vX[w] - civ.oX[o], dz = civ.vZ[w] - civ.oZ[o];
     if (st === 2) {
-      if (dx * dx + dz * dz < 0.2 * 0.2) {
+      if (dx * dx + dz * dz < 0.2 * 0.2 && civ.oStruct[o] >= 0) {   // a reopened work: carry on from where it stands
+        civ.oState[o] = 3; civ.vState[w] = ST_IDLE; civ.vTimer[w] = 99;
+      } else if (dx * dx + dz * dz < 0.2 * 0.2) {
         const s = addStructure(civ, civ.oKind[o], civ.oX[o], civ.oZ[o], 0, 0, civ.oDirX[o], civ.oDirZ[o], civ.oLen[o]);
         if (s < 0) { civ.oState[o] = 0; civ.vJob[w] = -1; civ.oWorker[o] = -1; releaseOrderSuppliers(civ, o); continue; }
         civ.oStruct[o] = s; civ.oState[o] = 3; civ.vState[w] = ST_IDLE; civ.vTimer[w] = 99;
@@ -794,7 +808,21 @@ function secondTick(world) {
     for (let s = 0; s < civ.nS; s++) {
       if (civ.sKind[s] !== KIND_DWELLING || civ.sDecay[s] < 0.3) continue;
       const dx = civ.sX[s] - m[k * 4], dz = civ.sZ[s] - m[k * 4 + 1];
-      if (dx * dx + dz * dz < 2.8 * 2.8) reviveStructure(world, s);
+      if (dx * dx + dz * dz >= 2.8 * 2.8) continue;
+      // society: a 10% chance each second (Jordan, 2026-10-23), from a stateless hash so world.rng is untouched;
+      // a certain revive kept abandoned homes near a monolith alive forever, so their slots never freed
+      if (civ.societyOn === 1 && reviveRoll(world.seed, world.stats.time, s, k) >= SOCIETY.monolithRevive) continue;
+      reviveStructure(world, s);
+    }
+  }
+  // a Mason stays a Mason for life, unless their camp has no work left: then they go back to foraging (Jordan,
+  // 2026-10-23), so idle Masons do not hold the island's maxMasons places
+  if (civ.societyOn === 1) {
+    for (let v = 0; v < civ.nV; v++) {
+      if (civ.vAlive[v] === 0 || civ.vRole[v] !== ROLE_MASON || civ.vJob[v] >= 0) continue;
+      let work = false;
+      for (let o = 0; o < MAX_ORDERS && !work; o++) if (civ.oState[o] > 0 && civ.oCamp[o] === civ.vCamp[v]) work = true;
+      if (!work) { civ.vRole[v] = ROLE_FORAGER; civ.masons--; }
     }
   }
   // cultural drift: engineering pushes toward Industrious, tilled land toward Pastoral
@@ -931,9 +959,9 @@ export function civStep(world, dt) {
     if (civ.vVX[v] * civ.vVX[v] + civ.vVZ[v] * civ.vVZ[v] > 1e-4) {
       const h = Math.atan2(civ.vVX[v], civ.vVZ[v]);
       let dh = h - civ.vHeading[v];
-      while (dh > Math.PI) dh -= 6.2832;
-      while (dh < -Math.PI) dh += 6.2832;
-      civ.vHeading[v] += dh * Math.min(1, dt * 8);
+      dh -= 6.2832 * Math.round(dh / 6.2832);   // wrap to [-pi, pi] in one step (a while loop never ends on a huge value)
+      if (!(Math.abs(dh) <= 3.2)) dh = 0;   // a nonsense heading (NaN, or too large to wrap): face the walk
+      civ.vHeading[v] = h - dh * (1 - Math.min(1, dt * 8));   // = heading + dh * k (mod 2 pi), but always near h, so it stays in range
     }
   }
   civ.orderClock += dt;

@@ -88,16 +88,17 @@ export function createWaterfalls(world) {
     sums.fill(0);
     const rim = w.rimCells, out = w.rimOut;
     for (let k = 0; k < rim.length; k++) sums[cellSector[k]] += out[rim[k]];
-    // the first update starts at full flow: easing in from 0 made frame 1 depend on how long it took (the smoke
-    // check counts programs at frame 1 and missed the waterfall's when that frame was quick)
+    // the first update with any outflow starts at full flow: easing in from 0 made frame 1 depend on how long it
+    // took (the smoke check counts programs at frame 1 and missed the waterfall's when that frame was quick). A
+    // restored save has no outflow until the first substep, so 'first' waits for it
     const a = first ? 1 : 1 - Math.exp(-dt / 0.6);
-    first = false;
     let any = 0;
     for (let s = 0; s < SECTORS; s++) {
       const target = Math.pow(Math.min(1, sums[s] / 0.006), 0.6);       // 0.006 ~ the strongest sector's mean outflow per substep
       flow[s] += (target - flow[s]) * a;
       if (flow[s] > 0.03) any++;
     }
+    if (any > 0) first = false;
     mesh.visible = any > 0;
   };
   mesh.userData.flow = flow;
