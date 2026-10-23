@@ -322,7 +322,7 @@ Seeds for the multi-seed tests: 1337, 7, 4242 (5a); add 99 and 2026 for 5b and 5
   taller thinner trunk, 0.8x height) on dry or poor ground, else broadleaf. Only the crown and trunk vertices move;
   the flora mesh stays 108 vertices (`test-geo` check).
   Observed: scrub is rare, because dry or poor ground carries almost no biomass, so few trees stand there to
-  show it (one flat-top in the 2,500 s reference frame). Left as is pending Jordan's call.
+  show it (one flat-top in the 2,500 s reference frame). Jordan (2026-10-23): leave dry and poor ground as is.
 - Fields: `world.field` (runtime only, not saved) is rebuilt in the 1 Hz home-clearing pass: 1 out to 55% of
   `homeClearRadius` around a healthy home whose camp knows Farming (the town: `GATE_FARM`), fading to 0 at the edge.
   It rides in `texC.a` on the biomass upload. The terrain shader draws furrows there; field tufts are even-height
